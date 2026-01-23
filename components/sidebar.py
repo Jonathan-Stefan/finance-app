@@ -118,7 +118,7 @@ layout = dbc.Col([
                                 html.Label("Categoria da receita"),
                                 dbc.Select(id="select_receita", 
                                     options=[{"label": i, "value": i} for i in cat_receita], 
-                                    value=cat_receita)
+                                    value=cat_receita[0] if cat_receita else None)
                             ], width=4)
                         ], className="mb-3"),
                         
@@ -218,7 +218,7 @@ layout = dbc.Col([
                                 html.Label("Categoria da despesa"),
                                 dbc.Select(id="select_despesa", 
                                     options=[{"label": i, "value": i} for i in cat_despesa],
-                                    value = [cat_despesa[0]])
+                                    value=cat_despesa[0] if cat_despesa else None)
                             ], width=4)
                         ]),
                         

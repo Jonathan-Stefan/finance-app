@@ -107,6 +107,12 @@ def init_db():
         backfill_usernames()
     except Exception as e:
         print('[DB] warning: backfill_usernames failed:', e)
+    
+    # Limpa categorias órfãs (sem user_id) - evita problemas de categorias globais
+    try:
+        cleanup_orphan_categories()
+    except Exception as e:
+        print('[DB] warning: cleanup_orphan_categories failed:', e)
 
 
 def table_to_df(table, user_id=None, include_id=False):
@@ -482,4 +488,29 @@ def change_user_admin_status(user_id, is_admin, conn=None):
         conn.close()
     
     return True
+
+
+def cleanup_orphan_categories(conn=None):
+    """Remove categorias sem user_id (órfãs/globais)."""
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    
+    cur = conn.cursor()
+    
+    # Remove categorias sem usuário
+    cur.execute("DELETE FROM cat_receita WHERE user_id IS NULL")
+    cur.execute("DELETE FROM cat_despesa WHERE user_id IS NULL")
+    
+    deleted_receitas = cur.rowcount
+    conn.commit()
+    
+    cur.execute("SELECT changes()")
+    deleted_despesas = cur.fetchone()[0]
+    
+    if close:
+        conn.close()
+    
+    return {'deleted_cat_receita': deleted_receitas, 'deleted_cat_despesa': deleted_despesas}
 
