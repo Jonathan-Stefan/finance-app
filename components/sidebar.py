@@ -272,13 +272,18 @@ layout = dbc.Col([
                 [
                     dbc.NavLink("Dashboard", href="/dashboards", active="exact"),
                     dbc.NavLink("Extratos", href="/extratos", active="exact"),
-                ], vertical=True, pills=True, id='nav_buttons', style={"margin-bottom": "50px"}),
+                ], vertical=True, pills=True, id='nav_buttons', style={"margin-bottom": "10px"}),
+            
+            # Link Admin (condicional - será exibido apenas para admins via callback)
+            html.Div(id="admin-nav-link"),
+            
             dbc.Button(
                 "Logout",
                 id="logout-button",
                 color="secondary",
                 outline=True,
-                className="w-100"
+                className="w-100",
+                style={"margin-top": "10px"}
             ),
             ThemeChangerAIO(aio_id="theme", radio_props={"value":dbc.themes.CYBORG})
 
@@ -287,6 +292,18 @@ layout = dbc.Col([
     )
 
 # =========  Callbacks  =========== #
+# Mostrar link de Admin apenas para administradores
+@app.callback(
+    Output('admin-nav-link', 'children'),
+    Input('store-user', 'data')
+)
+def show_admin_link(user):
+    if user and user.get('is_admin'):
+        return dbc.Nav([
+            dbc.NavLink("🔐 Admin", href="/admin", active="exact", style={"color": "#ff9800", "font-weight": "bold"}),
+        ], vertical=True, pills=True, style={"margin-bottom": "10px"})
+    return html.Div()
+
 # Logout
 @app.callback(
     Output('store-user', 'data', allow_duplicate=True),

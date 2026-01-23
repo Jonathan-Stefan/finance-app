@@ -138,6 +138,9 @@ layout = dbc.Col([
     Input("store-receitas", "data"))
 def populate_dropdownvalues_receitas(data):
     df = pd.DataFrame(data)
+    if df.empty:
+        return [[], [], "R$ 0"]
+    
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
 
@@ -150,6 +153,9 @@ def populate_dropdownvalues_receitas(data):
     Input("store-despesas", "data"))
 def populate_dropdownvalues_despesas(data):
     df = pd.DataFrame(data)
+    if df.empty:
+        return [[], [], "R$ 0"]
+    
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
 
@@ -164,7 +170,9 @@ def saldo_total(despesas, receitas):
     df_despesas = pd.DataFrame(despesas)
     df_receitas = pd.DataFrame(receitas)
 
-    valor = df_receitas['Valor'].sum() - df_despesas['Valor'].sum()
+    valor_receitas = df_receitas['Valor'].sum() if not df_receitas.empty else 0
+    valor_despesas = df_despesas['Valor'].sum() if not df_despesas.empty else 0
+    valor = valor_receitas - valor_despesas
 
     return f"R$ {valor}"
     
@@ -292,6 +300,25 @@ def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_da
 )
 def pie_receita(data_receita, receita, theme):
     df = pd.DataFrame(data_receita)
+    
+    if df.empty or not receita:
+        fig = go.Figure()
+        fig.update_layout(
+            title={'text': "Receitas"},
+            margin=graph_margin,
+            template=template_from_url(theme),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            annotations=[{
+                'text': 'Sem dados',
+                'xref': 'paper',
+                'yref': 'paper',
+                'showarrow': False,
+                'font': {'size': 20}
+            }]
+        )
+        return fig
+    
     df = df[df['Categoria'].isin(receita)]
 
     fig = px.pie(df, values=df.Valor, names=df.Categoria, hole=.2)
@@ -310,6 +337,25 @@ def pie_receita(data_receita, receita, theme):
 )
 def pie_despesa(data_despesa, despesa, theme):
     df = pd.DataFrame(data_despesa)
+    
+    if df.empty or not despesa:
+        fig = go.Figure()
+        fig.update_layout(
+            title={'text': "Despesas"},
+            margin=graph_margin,
+            template=template_from_url(theme),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            annotations=[{
+                'text': 'Sem dados',
+                'xref': 'paper',
+                'yref': 'paper',
+                'showarrow': False,
+                'font': {'size': 20}
+            }]
+        )
+        return fig
+    
     df = df[df['Categoria'].isin(despesa)]
 
     fig = px.pie(df, values=df.Valor, names=df.Categoria, hole=.2)

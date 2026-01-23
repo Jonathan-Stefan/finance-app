@@ -7,7 +7,7 @@ import plotly.express as px
 
 # import from folders
 from app import *
-from components import sidebar, dashboards, extratos, login
+from components import sidebar, dashboards, extratos, login, admin
 from globals import *
 
 # DataFrames and Dcc.Store (loaded from SQLite)
@@ -80,6 +80,23 @@ def render_page_content(pathname, user):
 
     if pathname == "/extratos":
         return extratos.layout
+    
+    if pathname == "/admin":
+        # Verifica se o usuário é admin
+        if not user.get('is_admin'):
+            return html.Div([
+                dbc.Alert(
+                    [
+                        html.H4("⛔ Acesso Negado", className="alert-heading"),
+                        html.P("Você não tem permissão para acessar esta página."),
+                        html.Hr(),
+                        html.P("Apenas administradores podem acessar o painel de administração.", className="mb-0")
+                    ],
+                    color="danger",
+                    style={"margin": "50px auto", "max-width": "600px"}
+                )
+            ])
+        return admin.layout
 
     return html.Div([
         html.H3("404 - Página não encontrada"),

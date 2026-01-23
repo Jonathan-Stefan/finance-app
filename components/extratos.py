@@ -428,7 +428,26 @@ def sync_despesas(n_clicks, data, user, refresh):
     Input(ThemeChangerAIO.ids.radio("theme"), "value")]
 )
 def bar_chart(data, theme):
-    df = pd.DataFrame(data)   
+    df = pd.DataFrame(data)
+    
+    if df.empty:
+        graph = go.Figure()
+        graph.update_layout(
+            title="Despesas Gerais",
+            margin=graph_margin,
+            template=template_from_url(theme),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            annotations=[{
+                'text': 'Sem dados de despesas',
+                'xref': 'paper',
+                'yref': 'paper',
+                'showarrow': False,
+                'font': {'size': 16}
+            }]
+        )
+        return graph
+    
     df_grouped = df.groupby("Categoria").sum()[["Valor"]].reset_index()
     graph = px.bar(df_grouped, x='Categoria', y='Valor', title="Despesas Gerais")
     graph.update_layout(margin=graph_margin,template=template_from_url(theme))
@@ -442,6 +461,6 @@ def bar_chart(data, theme):
 )
 def display_desp(data):
     df = pd.DataFrame(data)
-    valor = df['Valor'].sum()
+    valor = df['Valor'].sum() if not df.empty else 0
     
     return f"R$ {valor}"

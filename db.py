@@ -426,3 +426,60 @@ def create_username_triggers(conn=None):
     if close:
         conn.close()
 
+
+# ---------- Funções de administração de usuários ---------- #
+
+def get_all_users(conn=None):
+    """Retorna lista de todos os usuários com informações básicas."""
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, is_admin FROM users ORDER BY id")
+    rows = cur.fetchall()
+    if close:
+        conn.close()
+    return [{'id': row[0], 'username': row[1], 'is_admin': row[2]} for row in rows]
+
+
+def delete_user(user_id, conn=None):
+    """Deleta um usuário e todos os seus dados relacionados."""
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    
+    cur = conn.cursor()
+    
+    # Deleta todos os dados relacionados ao usuário
+    cur.execute("DELETE FROM receitas WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM despesas WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM cat_receita WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM cat_despesa WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    
+    conn.commit()
+    
+    if close:
+        conn.close()
+    
+    return True
+
+
+def change_user_admin_status(user_id, is_admin, conn=None):
+    """Altera o status de admin de um usuário."""
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET is_admin = ? WHERE id = ?", (is_admin, user_id))
+    conn.commit()
+    
+    if close:
+        conn.close()
+    
+    return True
+
