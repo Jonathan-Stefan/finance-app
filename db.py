@@ -1,0 +1,428 @@
+import sqlite3
+import pandas as pd
+from pathlib import Path
+from werkzeug.security import generate_password_hash, check_password_hash
+
+DB_PATH = Path(__file__).resolve().parent / "finance.db"
+
+
+def connect_db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    return conn
+
+
+def init_db():
+    conn = connect_db()
+    cur = conn.cursor()
+
+    # Users table
+    cur.execute("""CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password_hash TEXT,
+        is_admin INTEGER DEFAULT 0,
+        profile_photo TEXT
+    )""")
+
+    # Escolhemos adicionar user_id nas outras tabelas para associar registros a usuários
+    cur.execute("""CREATE TABLE IF NOT EXISTS receitas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Valor REAL,
+        Efetuado INTEGER,
+        Fixo INTEGER,
+        Data TEXT,
+        Categoria TEXT,
+        Descrição TEXT,
+        user_id INTEGER
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS despesas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Valor REAL,
+        Efetuado INTEGER,
+        Fixo INTEGER,
+        Data TEXT,
+        Categoria TEXT,
+        Descrição TEXT,
+        user_id INTEGER,
+        Status TEXT
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS cat_receita (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Categoria TEXT,
+        user_id INTEGER
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS cat_despesa (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Categoria TEXT,
+        user_id INTEGER
+    )""")
+
+    conn.commit()
+
+    # Garante coluna user_id caso a versão anterior não a tivesse
+    add_column_if_missing(conn, 'receitas', 'user_id INTEGER')
+    add_column_if_missing(conn, 'despesas', 'user_id INTEGER')
+    add_column_if_missing(conn, 'cat_receita', 'user_id INTEGER')
+    add_column_if_missing(conn, 'cat_despesa', 'user_id INTEGER')
+
+    # Garante coluna username nas tabelas de transações (manter para exibição)
+    add_column_if_missing(conn, 'receitas', 'username TEXT')
+    add_column_if_missing(conn, 'despesas', 'username TEXT')
+    
+    # Garante coluna profile_photo na tabela users
+    add_column_if_missing(conn, 'users', 'profile_photo TEXT')
+    
+    # Garante coluna Status na tabela despesas e migra dados de Efetuado
+    add_column_if_missing(conn, 'despesas', 'Status TEXT')
+    migrate_efetuado_to_status(conn)
+
+    # Se não houver usuários, cria um admin padrão (troque senha após o primeiro login)
+    if get_user_count(conn) == 0:
+        admin_id = create_user('admin', 'admin', conn=conn, is_admin=1)
+        print(f"[DB] Created default admin user 'admin' (id={admin_id}) with password 'admin'. Change it ASAP.")
+
+    # Atribui registros existentes ao admin se user_id for NULL
+    admin = get_user_by_username('admin', conn=conn)
+    if admin:
+        cur.execute("UPDATE receitas SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
+        cur.execute("UPDATE despesas SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
+        cur.execute("UPDATE cat_receita SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
+        cur.execute("UPDATE cat_despesa SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
+        conn.commit()
+
+    # Cria triggers para manter coluna `username` consistente com a tabela `users`
+    try:
+        create_username_triggers(conn)
+    except Exception as e:
+        print('[DB] warning: create_username_triggers failed:', e)
+
+    conn.close()
+
+    # Garante que a coluna username nas tabelas de transações esteja preenchida a partir de users
+    # (Corrige registros antigos que ficaram sem username)
+    try:
+        backfill_usernames()
+    except Exception as e:
+        print('[DB] warning: backfill_usernames failed:', e)
+
+
+def table_to_df(table, user_id=None, include_id=False):
+    conn = connect_db()
+    if user_id is not None:
+        df = pd.read_sql_query(f"SELECT * FROM {table} WHERE user_id = ?", conn, params=(user_id,))
+    else:
+        df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+    conn.close()
+    
+    if 'Data' in df.columns:
+        # Use ISO date strings for JSON serialization/consistency
+        df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.strftime('%Y-%m-%d')
+    if not include_id and 'id' in df.columns:
+        df = df.drop(columns=['id'])
+    
+    return df
+
+
+def df_to_table(df, table):
+    conn = connect_db()
+    # Convert dates to ISO strings for storage
+    if 'Data' in df.columns:
+        df = df.copy()
+        df['Data'] = df['Data'].astype(str)
+    df.to_sql(table, conn, if_exists='replace', index=False)
+    conn.close()
+
+# ---------- Helpers para usuários e operações por usuário ---------- #
+
+def add_column_if_missing(conn, table, column_def):
+    cur = conn.cursor()
+    col_name = column_def.split()[0]
+    cur.execute(f"PRAGMA table_info({table})")
+    cols = [row[1] for row in cur.fetchall()]
+    if col_name not in cols:
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+        conn.commit()
+
+
+def get_user_count(conn=None):
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM users")
+    cnt = cur.fetchone()[0]
+    if close:
+        conn.close()
+    return cnt
+
+
+def create_user(username, password, conn=None, is_admin=0):
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+    pw_hash = generate_password_hash(password)
+    try:
+        cur.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)", (username, pw_hash, is_admin))
+        conn.commit()
+        uid = cur.lastrowid
+    except Exception as e:
+        # possível duplicata - tenta selecionar usuário existente
+        cur.execute("SELECT id FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        uid = row[0] if row else None
+    if close:
+        conn.close()
+    return uid
+
+
+def get_user_by_username(username, conn=None):
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, password_hash, is_admin FROM users WHERE username = ?", (username,))
+    row = cur.fetchone()
+    if close:
+        conn.close()
+    if not row:
+        return None
+    return {'id': row[0], 'username': row[1], 'password_hash': row[2], 'is_admin': row[3]}
+
+
+def verify_user(username, password):
+    user = get_user_by_username(username)
+    if not user:
+        return None
+    if check_password_hash(user['password_hash'], password):
+        return {'id': user['id'], 'username': user['username'], 'is_admin': user['is_admin']}
+    return None
+
+
+def update_user_profile_photo(user_id, photo_data):
+    """Atualiza a foto de perfil de um usuário."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET profile_photo = ? WHERE id = ?", (photo_data, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_user_profile_photo(user_id):
+    """Retorna a foto de perfil de um usuário."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("SELECT profile_photo FROM users WHERE id = ?", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    if row and row[0]:
+        return row[0]
+    return '/assets/img_hom.png'  # foto padrão
+
+
+def migrate_efetuado_to_status(conn=None):
+    """Migra dados da coluna Efetuado para Status na tabela despesas."""
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+    
+    # Migra apenas registros onde Status está NULL ou vazio
+    # Efetuado = 1 -> "Pago"
+    # Efetuado = 0 -> "A vencer"
+    cur.execute("UPDATE despesas SET Status = 'Pago' WHERE (Status IS NULL OR Status = '') AND Efetuado = 1")
+    cur.execute("UPDATE despesas SET Status = 'A vencer' WHERE (Status IS NULL OR Status = '') AND Efetuado = 0")
+    conn.commit()
+    
+    if close:
+        conn.close()
+
+
+def update_status_vencidos(user_id=None):
+    """Atualiza despesas com status 'A vencer' para 'Vencido' quando a data já passou."""
+    from datetime import datetime
+    conn = connect_db()
+    cur = conn.cursor()
+    hoje = datetime.now().strftime('%Y-%m-%d')
+    
+    if user_id:
+        cur.execute("UPDATE despesas SET Status = 'Vencido' WHERE Status = 'A vencer' AND Data < ? AND user_id = ?", (hoje, user_id))
+    else:
+        cur.execute("UPDATE despesas SET Status = 'Vencido' WHERE Status = 'A vencer' AND Data < ?", (hoje,))
+    
+    conn.commit()
+    conn.close()
+
+
+def insert_cat(table, categoria, user_id):
+    conn = connect_db()
+    cur = conn.cursor()
+    # evita duplicata para o mesmo usuário (pela combinação Categoria+user_id)
+    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE Categoria = ? AND user_id = ?", (categoria, user_id))
+    if cur.fetchone()[0] == 0:
+        cur.execute(f"INSERT INTO {table} (Categoria, user_id) VALUES (?,?)", (categoria, user_id))
+        conn.commit()
+    conn.close()
+
+
+def delete_cat(table, categoria, user_id):
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM {table} WHERE Categoria = ? AND user_id = ?", (categoria, user_id))
+    conn.commit()
+    conn.close()
+
+
+def insert_transacao(table, valor, recebido_ou_status, fixo, data, categoria, descricao, user_id):
+    conn = connect_db()
+    cur = conn.cursor()
+    if table == 'despesas':
+        # Para despesas, recebido_ou_status é o Status ("Pago", "A vencer", "Vencido")
+        cur.execute(f"INSERT INTO {table} (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (?,?,?,?,?,?,?)",
+                    (valor, recebido_ou_status, fixo, data, categoria, descricao, user_id))
+    else:
+        # Para receitas, mantém Efetuado
+        cur.execute(f"INSERT INTO {table} (Valor, Efetuado, Fixo, Data, Categoria, Descrição, user_id) VALUES (?,?,?,?,?,?,?)",
+                    (valor, recebido_ou_status, fixo, data, categoria, descricao, user_id))
+    conn.commit()
+    conn.close()
+
+
+def update_transacao(table, row_id, fields, user_id):
+    if not fields:
+        return
+    allowed = {"Valor", "Efetuado", "Fixo", "Data", "Categoria", "Descrição", "Status"}
+    payload = {k: v for k, v in fields.items() if k in allowed}
+    if not payload:
+        return
+    try:
+        row_id = int(row_id)
+    except Exception:
+        return
+    conn = connect_db()
+    cur = conn.cursor()
+    set_clause = ", ".join([f"{col} = ?" for col in payload.keys()])
+    values = list(payload.values()) + [row_id, user_id]
+    cur.execute(f"UPDATE {table} SET {set_clause} WHERE id = ? AND user_id = ?", values)
+    conn.commit()
+    conn.close()
+
+
+def delete_transacao(table, row_id, user_id):
+    try:
+        row_id = int(row_id)
+    except Exception:
+        return
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM {table} WHERE id = ? AND user_id = ?", (row_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def backfill_usernames(conn=None):
+    """Preenche a coluna `username` nas tabelas `receitas` e `despesas` a partir da tabela `users` quando estiverem NULL ou vazias.
+    Retorna um dicionário com contagens de linhas afetadas."""
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+    # Primeira passagem: apenas linhas sem username
+    cur.execute("UPDATE despesas SET username = (SELECT username FROM users WHERE users.id = despesas.user_id) WHERE username IS NULL OR username = ''")
+    cur.execute("UPDATE receitas SET username = (SELECT username FROM users WHERE users.id = receitas.user_id) WHERE username IS NULL OR username = ''")
+    conn.commit()
+
+    # Segunda passagem: garante que linhas com user_id preenchido possuam username (cobre casos inconsistentes)
+    cur.execute("UPDATE despesas SET username = (SELECT username FROM users WHERE users.id = despesas.user_id) WHERE user_id IS NOT NULL")
+    cur.execute("UPDATE receitas SET username = (SELECT username FROM users WHERE users.id = receitas.user_id) WHERE user_id IS NOT NULL")
+    conn.commit()
+
+    # Relatório de contagens
+    cur.execute("SELECT COUNT(*) FROM despesas WHERE username IS NULL OR username = ''")
+    rem_desp = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM receitas WHERE username IS NULL OR username = ''")
+    rem_rec = cur.fetchone()[0]
+
+    if close:
+        conn.close()
+
+    return {'remaining_despesas_without_username': rem_desp, 'remaining_receitas_without_username': rem_rec}
+
+
+def create_username_triggers(conn=None):
+    """Cria triggers para manter a coluna `username` consistente:
+     - após INSERT/UPDATE em receitas/despesas (ajusta username a partir de users)
+     - após UPDATE/DELETE em users (propaga mudanças ou limpa)
+    """
+    close = False
+    if conn is None:
+        conn = connect_db()
+        close = True
+    cur = conn.cursor()
+
+    # Ao inserir uma transação, preenche username a partir do user_id
+    cur.execute("""
+    CREATE TRIGGER IF NOT EXISTS trg_set_username_on_receitas_insert
+    AFTER INSERT ON receitas
+    BEGIN
+        UPDATE receitas SET username = (SELECT username FROM users WHERE users.id = NEW.user_id) WHERE rowid = NEW.rowid;
+    END;
+    """)
+
+    cur.execute("""
+    CREATE TRIGGER IF NOT EXISTS trg_set_username_on_despesas_insert
+    AFTER INSERT ON despesas
+    BEGIN
+        UPDATE despesas SET username = (SELECT username FROM users WHERE users.id = NEW.user_id) WHERE rowid = NEW.rowid;
+    END;
+    """)
+
+    # Ao atualizar user_id em uma transação, atualiza username também
+    cur.execute("""
+    CREATE TRIGGER IF NOT EXISTS trg_update_username_on_receitas_userid
+    AFTER UPDATE OF user_id ON receitas
+    BEGIN
+        UPDATE receitas SET username = (SELECT username FROM users WHERE users.id = NEW.user_id) WHERE rowid = NEW.rowid;
+    END;
+    """)
+
+    cur.execute("""
+    CREATE TRIGGER IF NOT EXISTS trg_update_username_on_despesas_userid
+    AFTER UPDATE OF user_id ON despesas
+    BEGIN
+        UPDATE despesas SET username = (SELECT username FROM users WHERE users.id = NEW.user_id) WHERE rowid = NEW.rowid;
+    END;
+    """)
+
+    # Ao atualizar username em users, propaga a mudança
+    cur.execute("""
+    CREATE TRIGGER IF NOT EXISTS trg_update_username_on_users_update
+    AFTER UPDATE OF username ON users
+    BEGIN
+        UPDATE receitas SET username = NEW.username WHERE user_id = NEW.id;
+        UPDATE despesas SET username = NEW.username WHERE user_id = NEW.id;
+    END;
+    """)
+
+    # Ao remover usuário, limpa o username nas transações
+    cur.execute("""
+    CREATE TRIGGER IF NOT EXISTS trg_delete_user_set_username_null
+    AFTER DELETE ON users
+    BEGIN
+        UPDATE receitas SET username = NULL WHERE user_id = OLD.id;
+        UPDATE despesas SET username = NULL WHERE user_id = OLD.id;
+    END;
+    """)
+
+    conn.commit()
+    if close:
+        conn.close()
+
