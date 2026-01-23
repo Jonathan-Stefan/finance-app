@@ -46,7 +46,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], width=4),
+            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
 
             # Receita
             dbc.Col([
@@ -61,7 +61,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], width=4),
+            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
 
             # Despesa
             dbc.Col([
@@ -76,7 +76,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], width=4),
+            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
         ], style={"margin": "10px"}),
 
         dbc.Row([
@@ -114,18 +114,18 @@ layout = dbc.Col([
                         id='date-picker-config',
                         style={'z-index': '100'}),
                 ], style={"height": "100%", "padding": "20px"}), 
-            ], width=4),
+            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
 
             dbc.Col(
-                dbc.Card(dcc.Graph(id="graph1"), style={"height": "100%", "padding": "10px"}), width=8
+                dbc.Card(dcc.Graph(id="graph1", config={'responsive': True}), style={"height": "100%", "padding": "10px"}), xs=12, sm=12, md=8, lg=8
             ),
-        ], style={"margin": "10px"}),
+        ], style={"margin": "10px"}, className="g-2"),
 
         dbc.Row([
-            dbc.Col(dbc.Card(dcc.Graph(id="graph2"), style={"padding": "10px"}), width=6),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph3"), style={"padding": "10px"}), width=3),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph4"), style={"padding": "10px"}), width=3),
-        ], style={"margin": "10px"})
+            dbc.Col(dbc.Card(dcc.Graph(id="graph2", config={'responsive': True}), style={"padding": "10px"}), xs=12, sm=12, md=6, lg=6, className="mb-3 mb-md-0"),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph3", config={'responsive': True}), style={"padding": "10px"}), xs=12, sm=6, md=3, lg=3, className="mb-3 mb-md-0"),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph4", config={'responsive': True}), style={"padding": "10px"}), xs=12, sm=6, md=3, lg=3, className="mb-3 mb-md-0"),
+        ], style={"margin": "10px"}, className="g-2")
     ])
 
 
@@ -214,7 +214,12 @@ def update_output(data_despesa, data_receita, despesa, receita, theme):
     
     fig.add_trace(go.Scatter(name='Receitas', x=df_rc['Data'], y=df_rc['Acumulo'], fill='tonextx', mode='lines'))
 
-    fig.update_layout(margin=graph_margin, template=template_from_url(theme))
+    fig.update_layout(
+        margin=graph_margin, 
+        template=template_from_url(theme),
+        autosize=True,
+        height=None
+    )
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     return fig
 

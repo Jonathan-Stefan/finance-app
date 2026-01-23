@@ -68,14 +68,14 @@ layout = dbc.Col([
                 dbc.Row([
                     dbc.Col([
                         dbc.Button(color="success", id="open-novo-receita",
-                                children=["+ Receita"]),
-                    ], width=6),
+                                children=["+ Receita"], className="w-100"),
+                    ], xs=6, sm=6, md=6),
 
                     dbc.Col([
                         dbc.Button(color="danger", id="open-novo-despesa",
-                                children=["- Despesa"]),
-                    ], width=6)
-                ]),
+                                children=["- Despesa"], className="w-100"),
+                    ], xs=6, sm=6, md=6)
+                ], className="mb-3"),
 
 
                 # Modal Receita            

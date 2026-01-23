@@ -31,8 +31,8 @@ df_cat_receita = table_to_df('cat_receita')
 df_cat_despesa = table_to_df('cat_despesa')
 
 if df_cat_receita.empty and df_cat_despesa.empty:
-    cat_receita = {'Categoria': ["Salário", "Investimentos", "Comissão"]}
-    cat_despesa = {'Categoria': ["Alimentação", "Aluguel", "Gasolina", "Saúde", "Lazer"]}
+    cat_receita = {'Categoria': []}
+    cat_despesa = {'Categoria': []}
     df_cat_receita = pd.DataFrame(cat_receita)
     df_cat_despesa = pd.DataFrame(cat_despesa)
     df_to_table(df_cat_receita, 'cat_receita')

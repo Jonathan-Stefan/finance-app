@@ -48,12 +48,12 @@ def serve_layout():
         dbc.Row([
             dbc.Col([
                 sidebar.layout
-            ], md=2),
+            ], xs=12, sm=12, md=3, lg=2, id="sidebar-col"),
 
             dbc.Col([
                 content
-            ], md=10),
-        ])
+            ], xs=12, sm=12, md=9, lg=10),
+        ], className="g-0")
 
     ], fluid=True, style={"padding": "0px"}, className="dbc")
 
@@ -112,4 +112,10 @@ def reload_user_stores(user, r_rec, r_des, r_cat_rec, r_cat_des):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8050)
+    import os
+    # Detecta se está em produção
+    debug_mode = os.getenv('DEBUG', 'True').lower() == 'true'
+    port = int(os.getenv('PORT', 8050))
+    host = os.getenv('HOST', '0.0.0.0')
+    
+    app.run(debug=debug_mode, host=host, port=port)
