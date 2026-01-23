@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: finance-app
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn myindex:server -b 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.16
