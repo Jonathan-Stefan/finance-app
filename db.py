@@ -267,7 +267,8 @@ def create_user(username, password, conn=None, is_admin=0):
             uid = cur.lastrowid
         conn.commit()
     except Exception as e:
-        # possível duplicata - tenta selecionar usuário existente
+        # possível duplicata - rollback e tenta selecionar usuário existente
+        conn.rollback()
         cur.execute(convert_query_placeholders("SELECT id FROM users WHERE username = ?"), (username,))
         row = cur.fetchone()
         uid = row[0] if row else None
