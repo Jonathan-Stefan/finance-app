@@ -148,10 +148,10 @@ def init_db():
     # Atribui registros existentes ao admin se user_id for NULL
     admin = get_user_by_username('admin', conn=conn)
     if admin:
-        cur.execute("UPDATE receitas SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
-        cur.execute("UPDATE despesas SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
-        cur.execute("UPDATE cat_receita SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
-        cur.execute("UPDATE cat_despesa SET user_id = ? WHERE user_id IS NULL", (admin['id'],))
+        cur.execute(convert_query_placeholders("UPDATE receitas SET user_id = ? WHERE user_id IS NULL"), (admin['id'],))
+        cur.execute(convert_query_placeholders("UPDATE despesas SET user_id = ? WHERE user_id IS NULL"), (admin['id'],))
+        cur.execute(convert_query_placeholders("UPDATE cat_receita SET user_id = ? WHERE user_id IS NULL"), (admin['id'],))
+        cur.execute(convert_query_placeholders("UPDATE cat_despesa SET user_id = ? WHERE user_id IS NULL"), (admin['id'],))
         conn.commit()
 
     # Cria triggers para manter coluna `username` consistente com a tabela `users`
@@ -169,7 +169,6 @@ def init_db():
     conn.close()
 
     # Garante que a coluna username nas tabelas de transações esteja preenchida a partir de users
-    # (Corrige registros antigos que ficaram sem username)
     try:
         backfill_usernames()
     except Exception as e:
@@ -260,12 +259,16 @@ def create_user(username, password, conn=None, is_admin=0):
     cur = conn.cursor()
     pw_hash = generate_password_hash(password)
     try:
-        cur.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)", (username, pw_hash, is_admin))
+        if DB_TYPE == 'postgresql':
+            cur.execute(convert_query_placeholders("INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?) RETURNING id"), (username, pw_hash, is_admin))
+            uid = cur.fetchone()[0]
+        else:
+            cur.execute(convert_query_placeholders("INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)"), (username, pw_hash, is_admin))
+            uid = cur.lastrowid
         conn.commit()
-        uid = cur.lastrowid
     except Exception as e:
         # possível duplicata - tenta selecionar usuário existente
-        cur.execute("SELECT id FROM users WHERE username = ?", (username,))
+        cur.execute(convert_query_placeholders("SELECT id FROM users WHERE username = ?"), (username,))
         row = cur.fetchone()
         uid = row[0] if row else None
     if close:
@@ -279,7 +282,7 @@ def get_user_by_username(username, conn=None):
         conn = connect_db()
         close = True
     cur = conn.cursor()
-    cur.execute("SELECT id, username, password_hash, is_admin FROM users WHERE username = ?", (username,))
+    cur.execute(convert_query_placeholders("SELECT id, username, password_hash, is_admin FROM users WHERE username = ?"), (username,))
     row = cur.fetchone()
     if close:
         conn.close()
@@ -301,7 +304,7 @@ def update_user_profile_photo(user_id, photo_data):
     """Atualiza a foto de perfil de um usuário."""
     conn = connect_db()
     cur = conn.cursor()
-    cur.execute("UPDATE users SET profile_photo = ? WHERE id = ?", (photo_data, user_id))
+    cur.execute(convert_query_placeholders("UPDATE users SET profile_photo = ? WHERE id = ?"), (photo_data, user_id))
     conn.commit()
     conn.close()
 
@@ -310,7 +313,7 @@ def get_user_profile_photo(user_id):
     """Retorna a foto de perfil de um usuário."""
     conn = connect_db()
     cur = conn.cursor()
-    cur.execute("SELECT profile_photo FROM users WHERE id = ?", (user_id,))
+    cur.execute(convert_query_placeholders("SELECT profile_photo FROM users WHERE id = ?"), (user_id,))
     row = cur.fetchone()
     conn.close()
     if row and row[0]:
@@ -383,9 +386,9 @@ def insert_cat(table, categoria, user_id):
     conn = connect_db()
     cur = conn.cursor()
     # evita duplicata para o mesmo usuário (pela combinação Categoria+user_id)
-    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE Categoria = ? AND user_id = ?", (categoria, user_id))
+    cur.execute(convert_query_placeholders(f"SELECT COUNT(*) FROM {table} WHERE Categoria = ? AND user_id = ?"), (categoria, user_id))
     if cur.fetchone()[0] == 0:
-        cur.execute(f"INSERT INTO {table} (Categoria, user_id) VALUES (?,?)", (categoria, user_id))
+        cur.execute(convert_query_placeholders(f"INSERT INTO {table} (Categoria, user_id) VALUES (?,?)"), (categoria, user_id))
         conn.commit()
     conn.close()
 
@@ -393,7 +396,7 @@ def insert_cat(table, categoria, user_id):
 def delete_cat(table, categoria, user_id):
     conn = connect_db()
     cur = conn.cursor()
-    cur.execute(f"DELETE FROM {table} WHERE Categoria = ? AND user_id = ?", (categoria, user_id))
+    cur.execute(convert_query_placeholders(f"DELETE FROM {table} WHERE Categoria = ? AND user_id = ?"), (categoria, user_id))
     conn.commit()
     conn.close()
 
@@ -403,11 +406,11 @@ def insert_transacao(table, valor, status, fixo, data, categoria, descricao, use
     cur = conn.cursor()
     if table == 'despesas':
         # Para despesas, recebido_ou_status é o Status ("Pago", "A vencer", "Vencido")
-        cur.execute(f"INSERT INTO {table} (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (?,?,?,?,?,?,?)",
+        cur.execute(convert_query_placeholders(f"INSERT INTO {table} (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (?,?,?,?,?,?,?)"),
                     (valor, status, fixo, data, categoria, descricao, user_id))
     else:
         # Para receitas, mantém Efetuado e adiciona plano_id
-        cur.execute(f"INSERT INTO {table} (Valor, Efetuado, Fixo, Data, Categoria, Descrição, user_id, plano_id) VALUES (?,?,?,?,?,?,?,?)",
+        cur.execute(convert_query_placeholders(f"INSERT INTO {table} (Valor, Efetuado, Fixo, Data, Categoria, Descrição, user_id, plano_id) VALUES (?,?,?,?,?,?,?,?)"),
                     (valor, status, fixo, data, categoria, descricao, user_id, plano_id))
     conn.commit()
     conn.close()
@@ -428,7 +431,8 @@ def update_transacao(table, row_id, fields, user_id):
     cur = conn.cursor()
     set_clause = ", ".join([f"{col} = ?" for col in payload.keys()])
     values = list(payload.values()) + [row_id, user_id]
-    cur.execute(f"UPDATE {table} SET {set_clause} WHERE id = ? AND user_id = ?", values)
+    query = f"UPDATE {table} SET {set_clause} WHERE id = ? AND user_id = ?"
+    cur.execute(convert_query_placeholders(query, len(values)), values)
     conn.commit()
     conn.close()
 
@@ -440,7 +444,7 @@ def delete_transacao(table, row_id, user_id):
         return
     conn = connect_db()
     cur = conn.cursor()
-    cur.execute(f"DELETE FROM {table} WHERE id = ? AND user_id = ?", (row_id, user_id))
+    cur.execute(convert_query_placeholders(f"DELETE FROM {table} WHERE id = ? AND user_id = ?"), (row_id, user_id))
     conn.commit()
     conn.close()
 
@@ -571,11 +575,11 @@ def delete_user(user_id, conn=None):
     cur = conn.cursor()
     
     # Deleta todos os dados relacionados ao usuário
-    cur.execute("DELETE FROM receitas WHERE user_id = ?", (user_id,))
-    cur.execute("DELETE FROM despesas WHERE user_id = ?", (user_id,))
-    cur.execute("DELETE FROM cat_receita WHERE user_id = ?", (user_id,))
-    cur.execute("DELETE FROM cat_despesa WHERE user_id = ?", (user_id,))
-    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    cur.execute(convert_query_placeholders("DELETE FROM receitas WHERE user_id = ?"), (user_id,))
+    cur.execute(convert_query_placeholders("DELETE FROM despesas WHERE user_id = ?"), (user_id,))
+    cur.execute(convert_query_placeholders("DELETE FROM cat_receita WHERE user_id = ?"), (user_id,))
+    cur.execute(convert_query_placeholders("DELETE FROM cat_despesa WHERE user_id = ?"), (user_id,))
+    cur.execute(convert_query_placeholders("DELETE FROM users WHERE id = ?"), (user_id,))
     
     conn.commit()
     
