@@ -33,11 +33,12 @@ layout = dbc.Col([
             dbc.Card([
                 dbc.CardHeader(
                     html.Div([
-                        html.H5("Principais Planos", className="d-inline"),
+                        html.H5("Principais Planos", className="d-inline", 
+                               style={"color": "#2c3e50", "font-weight": "bold"}),
                         dbc.Button("Editar", color="warning", size="sm", 
                                   id="btn-editar-planos", className="float-end")
                     ]),
-                    style={"background-color": "#f8f9fa"}
+                    style={"background-color": "#e8f4f8"}
                 ),
                 dbc.CardBody([
                     dbc.Row([
@@ -59,8 +60,11 @@ layout = dbc.Col([
         dbc.Col([
             # Velocímetro
             dbc.Card([
-                dbc.CardHeader("Grau de Compromisso (Mês Atual)", 
-                             style={"background-color": "#f8f9fa"}),
+                dbc.CardHeader(
+                    html.H5("Grau de Compromisso (Mês Atual)", 
+                           style={"color": "#2c3e50", "font-weight": "bold", "margin": "0"}),
+                    style={"background-color": "#e8f4f8"}
+                ),
                 dbc.CardBody([
                     dcc.Graph(id="graph-velocimetro", config={"displayModeBar": False}),
                     html.Div([
@@ -85,7 +89,11 @@ layout = dbc.Col([
             
             # Anotações
             dbc.Card([
-                dbc.CardHeader("Anotações", style={"background-color": "#f8f9fa"}),
+                dbc.CardHeader(
+                    html.H5("Anotações", 
+                           style={"color": "#2c3e50", "font-weight": "bold", "margin": "0"}),
+                    style={"background-color": "#e8f4f8"}
+                ),
                 dbc.CardBody([
                     dbc.Textarea(
                         id="textarea-anotacoes",
@@ -106,11 +114,12 @@ layout = dbc.Col([
             dbc.Card([
                 dbc.CardHeader(
                     html.Div([
-                        html.H5("Planos do Mês Atual", className="d-inline"),
+                        html.H5("Planos do Mês Atual", className="d-inline", 
+                               style={"color": "#2c3e50", "font-weight": "bold"}),
                         dbc.Button("➕", color="success", size="sm", 
                                   id="btn-add-plano-mes", className="float-end")
                     ]),
-                    style={"background-color": "#f8f9fa"}
+                    style={"background-color": "#e8f4f8"}
                 ),
                 dbc.CardBody([
                     html.Div(id="tabela-planos-mes")
@@ -123,11 +132,12 @@ layout = dbc.Col([
             dbc.Card([
                 dbc.CardHeader(
                     html.Div([
-                        html.H5("Montante Acumulado", className="d-inline"),
+                        html.H5("Montante Acumulado", className="d-inline", 
+                               style={"color": "#2c3e50", "font-weight": "bold"}),
                         dbc.Button("➕", color="success", size="sm", 
                                   id="btn-add-montante", className="float-end")
                     ]),
-                    style={"background-color": "#f8f9fa"}
+                    style={"background-color": "#e8f4f8"}
                 ),
                 dbc.CardBody([
                     html.Div(id="tabela-montante-acumulado")
@@ -443,15 +453,15 @@ def update_tabela_planos(planos, user):
     
     table = dbc.Table([
         html.Thead(html.Tr([
-            html.Th("Plano/Meta", style={"background-color": "#17a2b8", "color": "white"}),
+            html.Th("Plano/Meta", style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Valor Acumulado", className="text-end", 
-                   style={"background-color": "#17a2b8", "color": "white"}),
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Meta Total", className="text-end", 
-                   style={"background-color": "#17a2b8", "color": "white"}),
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Progresso", className="text-center", 
-                   style={"background-color": "#17a2b8", "color": "white"}),
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Ações", className="text-center", 
-                   style={"background-color": "#17a2b8", "color": "white"}),
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
         ])),
         html.Tbody(rows)
     ], bordered=True, hover=True, responsive=True, striped=True, size="sm")
@@ -491,12 +501,12 @@ def update_tabela_montantes(montantes):
     
     table = dbc.Table([
         html.Thead(html.Tr([
-            html.Th("Nome", style={"background-color": "#17a2b8", "color": "white"}),
-            html.Th("Tipo", style={"background-color": "#17a2b8", "color": "white"}),
+            html.Th("Nome", style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
+            html.Th("Tipo", style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Valor Acumulado", className="text-end", 
-                   style={"background-color": "#17a2b8", "color": "white"}),
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Ações", className="text-center",
-                   style={"background-color": "#17a2b8", "color": "white"}),
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
         ])),
         html.Tbody(rows)
     ], bordered=True, hover=True, responsive=True, striped=True, size="sm")
