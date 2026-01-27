@@ -79,6 +79,3 @@ def do_register(n, username, password):
         return 'Erro ao criar usuário.'
     except Exception as e:
         return f'Erro: {e}'
-
-
-

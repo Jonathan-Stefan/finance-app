@@ -1,10 +1,8 @@
 /* ========= Base Layout ========= */
 #sidebar_completa{
-    height: 100vh;
+    min-height: 100vh;
     margin: 0px;
     padding: 20px;
-    overflow-y: auto;
-    /* background-image: url('back_sidebar4.png'); */
 }
 
 .row{
@@ -30,6 +28,129 @@
     justify-content: center;
     margin-bottom: 20px;
     border: 0px transparent solid;
+}
+
+/* ========= Gráficos ========= */
+#graph1 {
+    height: 350px;
+}
+
+#graph2, #graph3, #graph4 {
+    height: 350px;
+}
+
+/* Gráficos de Planos e Metas */
+#graph-plano-1, #graph-plano-2, #graph-plano-3 {
+    margin-bottom: 10px;
+    height: 250px !important;
+    max-height: 250px !important;
+}
+
+#graph-plano-1 .js-plotly-plot, 
+#graph-plano-2 .js-plotly-plot, 
+#graph-plano-3 .js-plotly-plot {
+    height: 250px !important;
+    max-height: 250px !important;
+}
+
+#graph-velocimetro {
+    margin-bottom: 10px;
+    height: 200px !important;
+    max-height: 200px !important;
+}
+
+#graph-velocimetro .js-plotly-plot {
+    height: 200px !important;
+    max-height: 200px !important;
+}
+
+/* Cards de Planos com sombra suave */
+.card {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.card-header {
+    border-top-left-radius: 8px !important;
+    border-top-right-radius: 8px !important;
+    font-weight: 600;
+}
+
+/* Tabelas estilo Planner */
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 12px;
+    border: none;
+}
+
+.table tbody td {
+    padding: 10px 12px;
+    vertical-align: middle;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+/* ========= Tabelas DataTable ========= */
+/* Corrigir cor do dropdown de Status nas tabelas */
+.Select-menu-outer {
+    background-color: white !important;
+    color: #000 !important;
+}
+
+.Select-menu-outer .VirtualizedSelectOption {
+    color: #000 !important;
+    background-color: white !important;
+}
+
+.Select-menu-outer .VirtualizedSelectOption:hover {
+    background-color: #f0f0f0 !important;
+    color: #000 !important;
+}
+
+.Select-menu-outer .VirtualizedSelectFocusedOption {
+    background-color: #e6f2ff !important;
+    color: #000 !important;
+}
+
+/* Dropdown da célula editável */
+.dash-dropdown {
+    color: #000 !important;
+}
+
+.dash-dropdown .Select-value-label {
+    color: #000 !important;
+}
+
+.dash-dropdown .Select-placeholder {
+    color: #666 !important;
+}
+
+/* Estilo para o dropdown quando aberto */
+.dash-table-container .Select-menu {
+    background-color: white !important;
+}
+
+.dash-table-container .Select-option {
+    color: #000 !important;
+    background-color: white !important;
+}
+
+.dash-table-container .Select-option:hover {
+    background-color: #f0f0f0 !important;
+    color: #000 !important;
 }
 
 /* ========= Responsividade Mobile ========= */

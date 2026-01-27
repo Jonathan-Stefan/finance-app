@@ -1,16 +1,24 @@
 import dash
-from dash.dependencies import Input, Output, State
-from dash import dash_table
-from dash.dash_table.Format import Group
-from dash import dcc
-from dash import html
 import dash_bootstrap_components as dbc
-import plotly.express as px
 import pandas as pd
-
-from app import app
+import plotly.express as px
+import plotly.graph_objects as go
+from dash import dash_table, dcc, html
+from dash.dependencies import Input, Output, State
 from dash_bootstrap_templates import template_from_url, ThemeChangerAIO
-graph_margin=dict(l=25, r=25, t=25, b=0)
+from db import table_to_df, delete_transacao, update_transacao
+
+# Local imports
+from app import app
+from constants import (
+    COLOR_SUCCESS, GRAPH_MARGIN, TABLE_PAGE_SIZE,
+    StatusDespesa, EFETUADO_SIM, EFETUADO_NAO, FIXO_SIM, FIXO_NAO
+)
+
+from utils.validators import (
+    yesno_to_int, parse_float_value, normalize_date,
+    normalize_string, validate_status
+)
 
 # =========  Layout  =========== #
 layout = dbc.Col([
@@ -25,7 +33,47 @@ layout = dbc.Col([
         ], width=4),
     ], className="mb-2"),
     dbc.Row([
-        html.Div(id="tabela-receitas", className="dbc"),
+        dash_table.DataTable(
+            id='datatable-receitas',
+            columns=[
+                {"name": "ID", "id": "id", "editable": False},
+                {"name": "Valor", "id": "Valor"},
+                {"name": "Efetuado", "id": "Efetuado", "presentation": "dropdown"},
+                {"name": "Fixo", "id": "Fixo", "presentation": "dropdown"},
+                {"name": "Data", "id": "Data"},
+                {"name": "Categoria", "id": "Categoria"},
+                {"name": "Descrição", "id": "Descrição"},
+            ],
+            dropdown={
+                'Efetuado': {
+                    'options': [
+                        {'label': EFETUADO_SIM, 'value': EFETUADO_SIM},
+                        {'label': EFETUADO_NAO, 'value': EFETUADO_NAO}
+                    ]
+                },
+                'Fixo': {
+                    'options': [
+                        {'label': FIXO_SIM, 'value': FIXO_SIM},
+                        {'label': FIXO_NAO, 'value': FIXO_NAO}
+                    ]
+                }
+            },
+            data=[],
+            editable=True,
+            row_deletable=True,
+            filter_action="native",
+            sort_action="native",
+            sort_mode="single",
+            page_action="native",
+            page_current=0,
+            page_size=10,
+            style_cell_conditional=[
+                {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden'}
+            ],
+            style_header_conditional=[
+                {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden'}
+            ],
+        ),
     ]),
     html.Div(id="msg-receitas", className="mt-2"),
 
@@ -36,7 +84,75 @@ layout = dbc.Col([
         ], width=4),
     ], className="mb-2 mt-4"),
     dbc.Row([
-        html.Div(id="tabela-despesas", className="dbc"),
+        dash_table.DataTable(
+            id='datatable-despesas',
+            columns=[
+                {"name": "ID", "id": "id", "editable": False},
+                {"name": "Valor", "id": "Valor"},
+                {"name": "Status", "id": "Status", "presentation": "dropdown"},
+                {"name": "Fixo", "id": "Fixo", "presentation": "dropdown"},
+                {"name": "Data", "id": "Data"},
+                {"name": "Categoria", "id": "Categoria"},
+                {"name": "Descrição", "id": "Descrição"},
+            ],
+            dropdown={
+                'Status': {
+                    'options': [
+                        {'label': StatusDespesa.PAGO, 'value': StatusDespesa.PAGO},
+                        {'label': StatusDespesa.A_VENCER, 'value': StatusDespesa.A_VENCER},
+                        {'label': StatusDespesa.VENCIDO, 'value': StatusDespesa.VENCIDO}
+                    ]
+                },
+                'Fixo': {
+                    'options': [
+                        {'label': FIXO_SIM, 'value': FIXO_SIM},
+                        {'label': FIXO_NAO, 'value': FIXO_NAO}
+                    ]
+                }
+            },
+            data=[],
+            editable=True,
+            row_deletable=True,
+            filter_action="native",
+            sort_action="native",
+            sort_mode="single",
+            page_action="native",
+            page_current=0,
+            page_size=10,
+            style_cell_conditional=[
+                {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden'}
+            ],
+            style_header_conditional=[
+                {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden'}
+            ],
+            style_data_conditional=[
+                {
+                    'if': {
+                        'filter_query': f'{{Status}} = "{StatusDespesa.VENCIDO}"',
+                        'column_id': 'Status'
+                    },
+                    'backgroundColor': '#ffcccc',
+                    'color': 'darkred',
+                    'fontWeight': 'bold'
+                },
+                {
+                    'if': {
+                        'filter_query': f'{{Status}} = "{StatusDespesa.PAGO}"',
+                        'column_id': 'Status'
+                    },
+                    'backgroundColor': '#ccffcc',
+                    'color': 'darkgreen'
+                },
+                {
+                    'if': {
+                        'filter_query': f'{{Status}} = "{StatusDespesa.A_VENCER}"',
+                        'column_id': 'Status'
+                    },
+                    'backgroundColor': '#ffffcc',
+                    'color': '#cc8800'
+                }
+            ],
+        ),
     ]),
     html.Div(id="msg-despesas", className="mt-2"),
 
@@ -58,76 +174,38 @@ layout = dbc.Col([
 
 # =========  Callbacks  =========== #
 # Helpers
-def _yesno_to_int(value):
-    if value in (1, "1", True):
-        return 1
-    if value in (0, "0", False):
-        return 0
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in ("sim", "s", "true", "yes"):
-            return 1
-        if v in ("não", "nao", "n", "false", "no"):
-            return 0
-    return None
-
-
-def _parse_float(value):
-    if value in (None, "", "-"):
-        return None
-    try:
-        return float(str(value).replace(",", "."))
-    except Exception:
-        return None
-
-
-def _normalize_date(value):
-    if value in (None, "", "-"):
-        return None
-    dt = pd.to_datetime(value, errors="coerce")
-    if pd.isna(dt):
-        return None
-    return dt.strftime('%Y-%m-%d')
-
-
 def _normalize_row(row):
-    # Normaliza Status para despesas (se existir)
-    status = row.get("Status")
-    if status not in ("Pago", "A vencer", "Vencido"):
-        status = None
+    """Normaliza uma linha de dados para atualização no banco"""
+    # Normaliza Status para despesas
+    status = validate_status(row.get("Status"))
     
-    return {
-        "Valor": _parse_float(row.get("Valor")),
-        "Efetuado": _yesno_to_int(row.get("Efetuado")),
-        "Status": status,
-        "Fixo": _yesno_to_int(row.get("Fixo")),
-        "Data": _normalize_date(row.get("Data")),
-        "Categoria": None if row.get("Categoria") in (None, "", "-") else row.get("Categoria"),
-        "Descrição": None if row.get("Descrição") in (None, "", "-") else row.get("Descrição"),
+    # Para receitas, Efetuado ainda existe
+    efetuado = yesno_to_int(row.get("Efetuado"))
+    
+    result = {
+        "Valor": parse_float_value(row.get("Valor")),
+        "Fixo": yesno_to_int(row.get("Fixo")),
+        "Data": normalize_date(row.get("Data")),
+        "Categoria": normalize_string(row.get("Categoria")),
+        "Descrição": normalize_string(row.get("Descrição")),
     }
+    
+    # Adiciona Efetuado apenas se existir (para receitas)
+    if efetuado is not None:
+        result["Efetuado"] = efetuado
+    
+    # Adiciona Status apenas se existir (para despesas)
+    if status is not None:
+        result["Status"] = status
+    
+    return result
 
-
-def _row_map(rows):
-    if not rows:
-        return {}
-    mapped = {}
-    for r in rows:
-        rid = r.get("id")
-        if rid is not None:
-            try:
-                rid = int(rid)
-            except Exception:
-                pass
-            mapped[rid] = r
-    return mapped
-
-
-# Tabela receitas
+# Tabela receitas - atualizar dados
 @app.callback(
-    Output('tabela-receitas', 'children'),
+    Output('datatable-receitas', 'data'),
     Input('store-receitas', 'data')
 )
-def imprimir_tabela_receitas(data):
+def atualizar_dados_receitas(data):
     df = pd.DataFrame(data)
     if df.empty:
         df = pd.DataFrame(columns=["id", "Valor", "Efetuado", "Fixo", "Data", "Categoria", "Descrição", "user_id"])
@@ -135,54 +213,25 @@ def imprimir_tabela_receitas(data):
     df['Data'] = pd.to_datetime(df['Data']).dt.date
 
     df['Efetuado'] = df['Efetuado'].astype(object)
-    df.loc[df['Efetuado'] == 0, 'Efetuado'] = 'Não'
-    df.loc[df['Efetuado'] == 1, 'Efetuado'] = 'Sim'
+    df.loc[df['Efetuado'] == 0, 'Efetuado'] = EFETUADO_NAO
+    df.loc[df['Efetuado'] == 1, 'Efetuado'] = EFETUADO_SIM
 
     df['Fixo'] = df['Fixo'].astype(object)
-    df.loc[df['Fixo'] == 0, 'Fixo'] = 'Não'
-    df.loc[df['Fixo'] == 1, 'Fixo'] = 'Sim'
+    df.loc[df['Fixo'] == 0, 'Fixo'] = FIXO_NAO
+    df.loc[df['Fixo'] == 1, 'Fixo'] = FIXO_SIM
 
     df = df.fillna('-')
     df = df.drop(columns=[c for c in ["user_id"] if c in df.columns])
+    df = df.sort_values(by='Data', ascending=False)
+    
+    return df.to_dict('records')
 
-    df.sort_values(by='Data', ascending=False)
-
-    tabela = dash_table.DataTable(
-        id='datatable-receitas',
-        columns=[
-            {"name": "ID", "id": "id", "editable": False} if i == "id" else
-            {"name": i, "id": i, "deletable": False, "selectable": False, "hideable": True}
-            for i in df.columns
-        ],
-
-        data=df.to_dict('records'),
-        editable=True,
-        row_deletable=True,
-        filter_action="native",    
-        sort_action="native",       
-        sort_mode="single",  
-        selected_columns=[],        
-        selected_rows=[],          
-        page_action="native",      
-        page_current=0,             
-        page_size=10,
-        style_cell_conditional=[
-            {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden', 'textAlign': 'left'}
-        ],
-        style_header_conditional=[
-            {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden'}
-        ],
-    ),
-
-    return tabela
-
-
-# Tabela despesas
+# Tabela despesas - atualizar dados
 @app.callback(
-    Output('tabela-despesas', 'children'),
+    Output('datatable-despesas', 'data'),
     Input('store-despesas', 'data')
 )
-def imprimir_tabela_despesas(data):
+def atualizar_dados_despesas(data):
     df = pd.DataFrame(data)
     if df.empty:
         df = pd.DataFrame(columns=["id", "Valor", "Status", "Fixo", "Data", "Categoria", "Descrição", "user_id"])
@@ -191,88 +240,21 @@ def imprimir_tabela_despesas(data):
 
     # Se tiver Status, usa ele; senão mantém Efetuado (migração)
     if 'Status' not in df.columns:
-        df['Status'] = df.get('Efetuado', 0).apply(lambda x: 'Pago' if x == 1 else 'A vencer')
+        df['Status'] = df.get('Efetuado', 0).apply(lambda x: StatusDespesa.PAGO if x == 1 else StatusDespesa.A_VENCER)
     
     # Normaliza Status (garante que não tenha valores inválidos)
-    df['Status'] = df['Status'].fillna('A vencer')
+    df['Status'] = df['Status'].fillna(StatusDespesa.A_VENCER)
 
     df['Fixo'] = df['Fixo'].astype(object)
-    df.loc[df['Fixo'] == 0, 'Fixo'] = 'Não'
-    df.loc[df['Fixo'] == 1, 'Fixo'] = 'Sim'
+    df.loc[df['Fixo'] == 0, 'Fixo'] = FIXO_NAO
+    df.loc[df['Fixo'] == 1, 'Fixo'] = FIXO_SIM
 
     df = df.fillna('-')
     # Remove colunas desnecessárias
     df = df.drop(columns=[c for c in ["user_id", "Efetuado"] if c in df.columns])
+    df = df.sort_values(by='Data', ascending=False)
 
-    df.sort_values(by='Data', ascending=False)
-
-    tabela = dash_table.DataTable(
-        id='datatable-despesas',
-        columns=[
-            {"name": "ID", "id": "id", "editable": False} if i == "id" else
-            {"name": i, "id": i, "deletable": False, "selectable": False, "hideable": True, 
-             "presentation": "dropdown"} if i == "Status" else
-            {"name": i, "id": i, "deletable": False, "selectable": False, "hideable": True}
-            for i in df.columns
-        ],
-        dropdown={
-            'Status': {
-                'options': [
-                    {'label': 'Pago', 'value': 'Pago'},
-                    {'label': 'A vencer', 'value': 'A vencer'},
-                    {'label': 'Vencido', 'value': 'Vencido'}
-                ]
-            }
-        },
-
-        data=df.to_dict('records'),
-        editable=True,
-        row_deletable=True,
-        filter_action="native",    
-        sort_action="native",       
-        sort_mode="single",  
-        selected_columns=[],        
-        selected_rows=[],          
-        page_action="native",      
-        page_current=0,             
-        page_size=10,
-        style_cell_conditional=[
-            {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden', 'textAlign': 'left'}
-        ],
-        style_header_conditional=[
-            {'if': {'column_id': 'id'}, 'width': '0px', 'minWidth': '0px', 'maxWidth': '0px', 'overflow': 'hidden'}
-        ],
-        style_data_conditional=[
-            {
-                'if': {
-                    'filter_query': '{Status} = "Vencido"',
-                    'column_id': 'Status'
-                },
-                'backgroundColor': '#ffcccc',
-                'color': 'darkred',
-                'fontWeight': 'bold'
-            },
-            {
-                'if': {
-                    'filter_query': '{Status} = "Pago"',
-                    'column_id': 'Status'
-                },
-                'backgroundColor': '#ccffcc',
-                'color': 'darkgreen'
-            },
-            {
-                'if': {
-                    'filter_query': '{Status} = "A vencer"',
-                    'column_id': 'Status'
-                },
-                'backgroundColor': '#ffffcc',
-                'color': '#cc8800'
-            }
-        ],
-    ),
-
-    return tabela
-
+    return df.to_dict('records')
 
 # Capturar dados editados da tabela de receitas
 @app.callback(
@@ -282,7 +264,6 @@ def imprimir_tabela_despesas(data):
 )
 def capture_receitas_edits(data):
     return data
-
 
 # Sync receitas (update/delete)
 @app.callback(
@@ -302,12 +283,24 @@ def sync_receitas(n_clicks, data, user, refresh):
     if data is None:
         return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000)
     
-    from db import table_to_df, delete_transacao, update_transacao
     prev_records = table_to_df('receitas', user_id=user['id'], include_id=True).to_dict('records')
     
     # Mapear registros atuais e anteriores por ID
-    curr = {int(r['id']): r for r in data if r.get('id') is not None and str(r.get('id')).strip()}
-    prev = {int(r['id']): r for r in prev_records if r.get('id') is not None}
+    curr = {}
+    for r in data:
+        try:
+            if r.get('id') is not None and str(r.get('id')).strip():
+                curr[int(r['id'])] = r
+        except (ValueError, TypeError):
+            continue
+    
+    prev = {}
+    for r in prev_records:
+        try:
+            if r.get('id') is not None and str(r.get('id')).strip():
+                prev[int(r['id'])] = r
+        except (ValueError, TypeError):
+            continue
     
     curr_ids = set(curr.keys())
     prev_ids = set(prev.keys())
@@ -347,7 +340,6 @@ def sync_receitas(n_clicks, data, user, refresh):
     else:
         return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000)
 
-
 # Capturar dados editados da tabela de despesas
 @app.callback(
     Output('temp-despesas-data', 'data'),
@@ -356,7 +348,6 @@ def sync_receitas(n_clicks, data, user, refresh):
 )
 def capture_despesas_edits(data):
     return data
-
 
 # Sync despesas (update/delete)
 @app.callback(
@@ -376,12 +367,24 @@ def sync_despesas(n_clicks, data, user, refresh):
     if data is None:
         return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000)
     
-    from db import table_to_df, delete_transacao, update_transacao
     prev_records = table_to_df('despesas', user_id=user['id'], include_id=True).to_dict('records')
     
     # Mapear registros atuais e anteriores por ID
-    curr = {int(r['id']): r for r in data if r.get('id') is not None and str(r.get('id')).strip()}
-    prev = {int(r['id']): r for r in prev_records if r.get('id') is not None}
+    curr = {}
+    for r in data:
+        try:
+            if r.get('id') is not None and str(r.get('id')).strip():
+                curr[int(r['id'])] = r
+        except (ValueError, TypeError):
+            continue
+    
+    prev = {}
+    for r in prev_records:
+        try:
+            if r.get('id') is not None and str(r.get('id')).strip():
+                prev[int(r['id'])] = r
+        except (ValueError, TypeError):
+            continue
     
     curr_ids = set(curr.keys())
     prev_ids = set(prev.keys())
@@ -434,7 +437,7 @@ def bar_chart(data, theme):
         graph = go.Figure()
         graph.update_layout(
             title="Despesas Gerais",
-            margin=graph_margin,
+            margin=GRAPH_MARGIN,
             template=template_from_url(theme),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
@@ -450,7 +453,7 @@ def bar_chart(data, theme):
     
     df_grouped = df.groupby("Categoria").sum()[["Valor"]].reset_index()
     graph = px.bar(df_grouped, x='Categoria', y='Valor', title="Despesas Gerais")
-    graph.update_layout(margin=graph_margin,template=template_from_url(theme))
+    graph.update_layout(margin=GRAPH_MARGIN,template=template_from_url(theme))
     graph.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     return graph
 

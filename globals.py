@@ -1,5 +1,4 @@
-import pandas as pd
-from db import init_db, table_to_df, df_to_table
+from db import init_db
 
 # Inicializa DB e carrega tabelas
 init_db()

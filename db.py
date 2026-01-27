@@ -39,13 +39,12 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS despesas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         Valor REAL,
-        Efetuado INTEGER,
+        Status TEXT,
         Fixo INTEGER,
         Data TEXT,
         Categoria TEXT,
         Descrição TEXT,
-        user_id INTEGER,
-        Status TEXT
+        user_id INTEGER
     )""")
 
     cur.execute("""CREATE TABLE IF NOT EXISTS cat_receita (
@@ -67,6 +66,9 @@ def init_db():
     add_column_if_missing(conn, 'despesas', 'user_id INTEGER')
     add_column_if_missing(conn, 'cat_receita', 'user_id INTEGER')
     add_column_if_missing(conn, 'cat_despesa', 'user_id INTEGER')
+    
+    # Garante coluna plano_id na tabela receitas
+    add_column_if_missing(conn, 'receitas', 'plano_id INTEGER')
 
     # Garante coluna username nas tabelas de transações (manter para exibição)
     add_column_if_missing(conn, 'receitas', 'username TEXT')
@@ -98,6 +100,12 @@ def init_db():
         create_username_triggers(conn)
     except Exception as e:
         print('[DB] warning: create_username_triggers failed:', e)
+
+    # Cria tabelas de planos e metas
+    try:
+        init_planos_tables()
+    except Exception as e:
+        print('[DB] warning: init_planos_tables failed:', e)
 
     conn.close()
 
@@ -233,19 +241,24 @@ def get_user_profile_photo(user_id):
 
 
 def migrate_efetuado_to_status(conn=None):
-    """Migra dados da coluna Efetuado para Status na tabela despesas."""
+    """Migra dados da coluna Efetuado para Status na tabela despesas (se a coluna Efetuado ainda existir)."""
     close = False
     if conn is None:
         conn = connect_db()
         close = True
     cur = conn.cursor()
     
-    # Migra apenas registros onde Status está NULL ou vazio
-    # Efetuado = 1 -> "Pago"
-    # Efetuado = 0 -> "A vencer"
-    cur.execute("UPDATE despesas SET Status = 'Pago' WHERE (Status IS NULL OR Status = '') AND Efetuado = 1")
-    cur.execute("UPDATE despesas SET Status = 'A vencer' WHERE (Status IS NULL OR Status = '') AND Efetuado = 0")
-    conn.commit()
+    # Verifica se a coluna Efetuado existe
+    cur.execute("PRAGMA table_info(despesas)")
+    columns = [row[1] for row in cur.fetchall()]
+    
+    if 'Efetuado' in columns:
+        # Migra apenas registros onde Status está NULL ou vazio
+        # Efetuado = 1 -> "Pago"
+        # Efetuado = 0 -> "A vencer"
+        cur.execute("UPDATE despesas SET Status = 'Pago' WHERE (Status IS NULL OR Status = '') AND Efetuado = 1")
+        cur.execute("UPDATE despesas SET Status = 'A vencer' WHERE (Status IS NULL OR Status = '') AND Efetuado = 0")
+        conn.commit()
     
     if close:
         conn.close()
@@ -286,17 +299,17 @@ def delete_cat(table, categoria, user_id):
     conn.close()
 
 
-def insert_transacao(table, valor, recebido_ou_status, fixo, data, categoria, descricao, user_id):
+def insert_transacao(table, valor, status, fixo, data, categoria, descricao, user_id, plano_id=None):
     conn = connect_db()
     cur = conn.cursor()
     if table == 'despesas':
         # Para despesas, recebido_ou_status é o Status ("Pago", "A vencer", "Vencido")
         cur.execute(f"INSERT INTO {table} (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (?,?,?,?,?,?,?)",
-                    (valor, recebido_ou_status, fixo, data, categoria, descricao, user_id))
+                    (valor, status, fixo, data, categoria, descricao, user_id))
     else:
-        # Para receitas, mantém Efetuado
-        cur.execute(f"INSERT INTO {table} (Valor, Efetuado, Fixo, Data, Categoria, Descrição, user_id) VALUES (?,?,?,?,?,?,?)",
-                    (valor, recebido_ou_status, fixo, data, categoria, descricao, user_id))
+        # Para receitas, mantém Efetuado e adiciona plano_id
+        cur.execute(f"INSERT INTO {table} (Valor, Efetuado, Fixo, Data, Categoria, Descrição, user_id, plano_id) VALUES (?,?,?,?,?,?,?,?)",
+                    (valor, status, fixo, data, categoria, descricao, user_id, plano_id))
     conn.commit()
     conn.close()
 
@@ -514,3 +527,186 @@ def cleanup_orphan_categories(conn=None):
     
     return {'deleted_cat_receita': deleted_receitas, 'deleted_cat_despesa': deleted_despesas}
 
+
+# ---------- Funções para Planos e Metas ---------- #
+
+def init_planos_tables():
+    """Cria as tabelas de planos e montantes se não existirem."""
+    conn = connect_db()
+    cur = conn.cursor()
+    
+    # Tabela de planos/metas
+    cur.execute("""CREATE TABLE IF NOT EXISTS planos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT,
+        valor_total REAL,
+        valor_acumulado REAL DEFAULT 0,
+        categoria_despesa TEXT,
+        user_id INTEGER,
+        created_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )""")
+    
+    # Tabela de montantes acumulados
+    cur.execute("""CREATE TABLE IF NOT EXISTS montantes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        instituicao TEXT,
+        tipo TEXT,
+        valor REAL,
+        user_id INTEGER,
+        created_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )""")
+    
+    # Tabela de anotações
+    cur.execute("""CREATE TABLE IF NOT EXISTS anotacoes_planos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conteudo TEXT,
+        user_id INTEGER UNIQUE,
+        updated_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )""")
+    
+    conn.commit()
+    conn.close()
+
+
+def get_planos_by_user(user_id):
+    """Retorna todos os planos de um usuário."""
+    conn = connect_db()
+    df = pd.read_sql_query(
+        "SELECT id, nome, valor_total, valor_acumulado, categoria_despesa FROM planos WHERE user_id = ?",
+        conn, params=(user_id,)
+    )
+    conn.close()
+    return df.to_dict('records')
+
+
+def insert_plano(nome, valor_total, valor_acumulado, categoria_despesa, user_id):
+    """Insere um novo plano."""
+    from datetime import datetime
+    conn = connect_db()
+    cur = conn.cursor()
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cur.execute(
+        "INSERT INTO planos (nome, valor_total, valor_acumulado, categoria_despesa, user_id, created_at) VALUES (?,?,?,?,?,?)",
+        (nome, valor_total, valor_acumulado, categoria_despesa, user_id, created_at)
+    )
+    conn.commit()
+    plano_id = cur.lastrowid
+    conn.close()
+    return plano_id
+
+
+def update_plano(plano_id, nome, valor_total, valor_acumulado, categoria_despesa):
+    """Atualiza um plano existente."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE planos SET nome = ?, valor_total = ?, valor_acumulado = ?, categoria_despesa = ? WHERE id = ?",
+        (nome, valor_total, valor_acumulado, categoria_despesa, plano_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_plano(plano_id, user_id):
+    """Deleta um plano."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM planos WHERE id = ? AND user_id = ?", (plano_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def calculate_plano_valor_acumulado(plano_id, user_id):
+    """Calcula o valor acumulado de um plano baseado nas receitas destinadas a esse plano."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT SUM(Valor) FROM receitas WHERE plano_id = ? AND Efetuado = 1 AND user_id = ?",
+        (plano_id, user_id)
+    )
+    result = cur.fetchone()[0]
+    conn.close()
+    return result if result else 0
+
+
+def get_montantes_by_user(user_id):
+    """Retorna todos os montantes de um usuário."""
+    conn = connect_db()
+    df = pd.read_sql_query(
+        "SELECT id, instituicao, tipo, valor FROM montantes WHERE user_id = ?",
+        conn, params=(user_id,)
+    )
+    conn.close()
+    return df.to_dict('records')
+
+
+def insert_montante(instituicao, tipo, valor, user_id):
+    """Insere um novo montante."""
+    from datetime import datetime
+    conn = connect_db()
+    cur = conn.cursor()
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cur.execute(
+        "INSERT INTO montantes (instituicao, tipo, valor, user_id, created_at) VALUES (?,?,?,?,?)",
+        (instituicao, tipo, valor, user_id, created_at)
+    )
+    conn.commit()
+    montante_id = cur.lastrowid
+    conn.close()
+    return montante_id
+
+
+def update_montante(montante_id, instituicao, tipo, valor):
+    """Atualiza um montante existente."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE montantes SET instituicao = ?, tipo = ?, valor = ? WHERE id = ?",
+        (instituicao, tipo, valor, montante_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_montante(montante_id, user_id):
+    """Deleta um montante."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM montantes WHERE id = ? AND user_id = ?", (montante_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_anotacoes_planos(user_id):
+    """Retorna as anotações de planos de um usuário."""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("SELECT conteudo FROM anotacoes_planos WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+
+def save_anotacoes_planos(user_id, conteudo):
+    """Salva as anotações de planos de um usuário."""
+    from datetime import datetime
+    conn = connect_db()
+    cur = conn.cursor()
+    updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Verifica se já existe
+    cur.execute("SELECT id FROM anotacoes_planos WHERE user_id = ?", (user_id,))
+    exists = cur.fetchone()
+    
+    if exists:
+        cur.execute("UPDATE anotacoes_planos SET conteudo = ?, updated_at = ? WHERE user_id = ?",
+                   (conteudo, updated_at, user_id))
+    else:
+        cur.execute("INSERT INTO anotacoes_planos (conteudo, user_id, updated_at) VALUES (?,?,?)",
+                   (conteudo, user_id, updated_at))
+    
+    conn.commit()
+    conn.close()

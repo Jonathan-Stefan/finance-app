@@ -1,15 +1,21 @@
-from dash import html, dcc
-from dash.dependencies import Input, Output, State
+# Standard library imports
+import calendar
 from datetime import date, datetime, timedelta
+
+# Third party imports
 import dash_bootstrap_components as dbc
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import calendar
-from globals import *
+from dash import dcc, html
+from dash.dependencies import Input, Output, State
+from dash_bootstrap_templates import ThemeChangerAIO, template_from_url
+
+# Local imports
 from app import app
-from dash_bootstrap_templates import template_from_url, ThemeChangerAIO
+from constants import GRAPH_MARGIN
+from globals import *
 
 card_icon = {
     "color": "white",
@@ -18,7 +24,6 @@ card_icon = {
     "margin": "auto",
 }
 
-graph_margin=dict(l=25, r=25, t=25, b=0)
 today = datetime.today()
 # Início do mês
 start_date = today.replace(day=1).date()
@@ -46,7 +51,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
+            ], width=4),
 
             # Receita
             dbc.Col([
@@ -61,7 +66,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
+            ], width=4),
 
             # Despesa
             dbc.Col([
@@ -76,7 +81,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
+            ], width=4),
         ], style={"margin": "10px"}),
 
         dbc.Row([
@@ -113,19 +118,19 @@ layout = dbc.Col([
                         updatemode='singledate',
                         id='date-picker-config',
                         style={'z-index': '100'}),
-                ], style={"height": "100%", "padding": "20px"}), 
-            ], xs=12, sm=12, md=4, lg=4, className="mb-3 mb-md-0"),
+                ], style={"padding": "20px", "height": "98%"}), 
+            ], width=4),
 
             dbc.Col(
-                dbc.Card(dcc.Graph(id="graph1", config={'responsive': True}), style={"height": "100%", "padding": "10px"}), xs=12, sm=12, md=8, lg=8
+                dbc.Card(dcc.Graph(id="graph1"), style={"padding": "10px"}), width=8
             ),
-        ], style={"margin": "10px"}, className="g-2"),
+        ], style={"margin": "10px"}),
 
         dbc.Row([
-            dbc.Col(dbc.Card(dcc.Graph(id="graph2", config={'responsive': True}), style={"padding": "10px"}), xs=12, sm=12, md=6, lg=6, className="mb-3 mb-md-0"),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph3", config={'responsive': True}), style={"padding": "10px"}), xs=12, sm=6, md=3, lg=3, className="mb-3 mb-md-0"),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph4", config={'responsive': True}), style={"padding": "10px"}), xs=12, sm=6, md=3, lg=3, className="mb-3 mb-md-0"),
-        ], style={"margin": "10px"}, className="g-2")
+            dbc.Col(dbc.Card(dcc.Graph(id="graph2"), style={"padding": "10px"}), width=6),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph3"), style={"padding": "10px"}), width=3),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph4"), style={"padding": "10px"}), width=3),
+        ], style={"margin": "10px"})
     ])
 
 
@@ -138,11 +143,13 @@ layout = dbc.Col([
     Input("store-receitas", "data"))
 def populate_dropdownvalues_receitas(data):
     df = pd.DataFrame(data)
-    if df.empty:
-        return [[], [], "R$ 0"]
     
-    valor = df['Valor'].sum()
-    val = df.Categoria.unique().tolist()
+    # Excluir receitas que são destinadas a planos específicos
+    if not df.empty and 'plano_id' in df.columns:
+        df = df[df['plano_id'].isna()]
+    
+    valor = df['Valor'].sum() if not df.empty else 0
+    val = df.Categoria.unique().tolist() if not df.empty else []
 
     return [([{"label": x, "value": x} for x in df.Categoria.unique()]), val, f"R$ {valor}"]
 
@@ -153,9 +160,6 @@ def populate_dropdownvalues_receitas(data):
     Input("store-despesas", "data"))
 def populate_dropdownvalues_despesas(data):
     df = pd.DataFrame(data)
-    if df.empty:
-        return [[], [], "R$ 0"]
-    
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
 
@@ -169,10 +173,12 @@ def populate_dropdownvalues_despesas(data):
 def saldo_total(despesas, receitas):
     df_despesas = pd.DataFrame(despesas)
     df_receitas = pd.DataFrame(receitas)
+    
+    # Excluir receitas que são destinadas a planos específicos
+    if not df_receitas.empty and 'plano_id' in df_receitas.columns:
+        df_receitas = df_receitas[df_receitas['plano_id'].isna()]
 
-    valor_receitas = df_receitas['Valor'].sum() if not df_receitas.empty else 0
-    valor_despesas = df_despesas['Valor'].sum() if not df_despesas.empty else 0
-    valor = valor_receitas - valor_despesas
+    valor = df_receitas['Valor'].sum() - df_despesas['Valor'].sum()
 
     return f"R$ {valor}"
     
@@ -187,6 +193,10 @@ def saldo_total(despesas, receitas):
 def update_output(data_despesa, data_receita, despesa, receita, theme):
     df_ds = pd.DataFrame(data_despesa).sort_values(by='Data', ascending=True)
     df_rc = pd.DataFrame(data_receita).sort_values(by='Data', ascending=True)
+    
+    # Excluir receitas que são destinadas a planos específicos
+    if not df_rc.empty and 'plano_id' in df_rc.columns:
+        df_rc = df_rc[df_rc['plano_id'].isna()]
 
     dfs = [df_ds, df_rc]
 
@@ -222,12 +232,7 @@ def update_output(data_despesa, data_receita, despesa, receita, theme):
     
     fig.add_trace(go.Scatter(name='Receitas', x=df_rc['Data'], y=df_rc['Acumulo'], fill='tonextx', mode='lines'))
 
-    fig.update_layout(
-        margin=graph_margin, 
-        template=template_from_url(theme),
-        autosize=True,
-        height=None
-    )
+    fig.update_layout(margin=GRAPH_MARGIN, template=template_from_url(theme))
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     return fig
 
@@ -245,6 +250,10 @@ def update_output(data_despesa, data_receita, despesa, receita, theme):
 def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_date, theme):
     df_ds = pd.DataFrame(data_despesa)
     df_rc = pd.DataFrame(data_receita)
+    
+    # Excluir receitas que são destinadas a planos específicos
+    if not df_rc.empty and 'plano_id' in df_rc.columns:
+        df_rc = df_rc[df_rc['plano_id'].isna()]
 
     # adiciona coluna Output para legenda
     df_rc['Output'] = 'Receitas'
@@ -254,7 +263,7 @@ def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_da
     df_final = pd.concat([df_rc, df_ds], ignore_index=True, sort=False) if len([df for df in [df_rc, df_ds] if not df.empty])>0 else pd.DataFrame()
     if df_final.empty:
         fig = px.bar(pd.DataFrame(columns=['Data','Valor','Output']), x="Data", y="Valor", color='Output', barmode="group")
-        fig.update_layout(margin=graph_margin, template=template_from_url(theme))
+        fig.update_layout(margin=GRAPH_MARGIN, template=template_from_url(theme))
         fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         return fig
 
@@ -280,12 +289,12 @@ def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_da
 
     if df_final.empty:
         fig = px.bar(pd.DataFrame(columns=['Data','Valor','Output']), x="Data", y="Valor", color='Output', barmode="group")
-        fig.update_layout(margin=graph_margin, template=template_from_url(theme))
+        fig.update_layout(margin=GRAPH_MARGIN, template=template_from_url(theme))
         fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         return fig
 
     fig = px.bar(df_final.sort_values('Data'), x="Data", y="Valor", color='Output', barmode="group")        
-    fig.update_layout(margin=graph_margin, template=template_from_url(theme))
+    fig.update_layout(margin=GRAPH_MARGIN, template=template_from_url(theme))
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
 
     return fig
@@ -300,30 +309,11 @@ def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_da
 )
 def pie_receita(data_receita, receita, theme):
     df = pd.DataFrame(data_receita)
-    
-    if df.empty or not receita:
-        fig = go.Figure()
-        fig.update_layout(
-            title={'text': "Receitas"},
-            margin=graph_margin,
-            template=template_from_url(theme),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            annotations=[{
-                'text': 'Sem dados',
-                'xref': 'paper',
-                'yref': 'paper',
-                'showarrow': False,
-                'font': {'size': 20}
-            }]
-        )
-        return fig
-    
     df = df[df['Categoria'].isin(receita)]
 
     fig = px.pie(df, values=df.Valor, names=df.Categoria, hole=.2)
     fig.update_layout(title={'text': "Receitas"})
-    fig.update_layout(margin=graph_margin, template=template_from_url(theme))
+    fig.update_layout(margin=GRAPH_MARGIN, template=template_from_url(theme))
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                   
     return fig    
@@ -337,31 +327,12 @@ def pie_receita(data_receita, receita, theme):
 )
 def pie_despesa(data_despesa, despesa, theme):
     df = pd.DataFrame(data_despesa)
-    
-    if df.empty or not despesa:
-        fig = go.Figure()
-        fig.update_layout(
-            title={'text': "Despesas"},
-            margin=graph_margin,
-            template=template_from_url(theme),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            annotations=[{
-                'text': 'Sem dados',
-                'xref': 'paper',
-                'yref': 'paper',
-                'showarrow': False,
-                'font': {'size': 20}
-            }]
-        )
-        return fig
-    
     df = df[df['Categoria'].isin(despesa)]
 
     fig = px.pie(df, values=df.Valor, names=df.Categoria, hole=.2)
     fig.update_layout(title={'text': "Despesas"})
 
-    fig.update_layout(margin=graph_margin, template=template_from_url(theme))
+    fig.update_layout(margin=GRAPH_MARGIN, template=template_from_url(theme))
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
 
     return fig

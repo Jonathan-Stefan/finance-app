@@ -1,22 +1,27 @@
-import os
-import dash
+# Standard library imports
 import json
-import plotly.express as px
-from dash import html, dcc
-from dash.dependencies import Input, Output, State
+import os
+from datetime import date, datetime
+
+# Third party imports
+import dash
 import dash_bootstrap_components as dbc
-
-from app import app
-from datetime import datetime, date
-
-import pdb
+import pandas as pd
+from dash import dcc, html
+from dash.dependencies import Input, Output, State
 from dash_bootstrap_templates import ThemeChangerAIO
 
-# ========= DataFrames ========= #
-import numpy as np
-import pandas as pd
-from globals import *
-from db import table_to_df, df_to_table, insert_cat, delete_cat, insert_transacao, update_user_profile_photo, get_user_profile_photo
+# Local imports
+from app import app
+from constants import (
+    DEFAULT_AVATAR, TABLE_MIN_YEAR, TABLE_MAX_YEAR,
+    StatusDespesa, COLOR_SUCCESS, COLOR_DANGER, COLOR_INFO
+)
+from db import (
+    delete_cat, get_user_profile_photo, insert_cat,
+    insert_transacao, table_to_df, update_user_profile_photo
+)
+from globals import cat_despesa, cat_receita
 
 
 # ========= Layout ========= #
@@ -119,6 +124,13 @@ layout = dbc.Col([
                                 dbc.Select(id="select_receita", 
                                     options=[{"label": i, "value": i} for i in cat_receita], 
                                     value=cat_receita[0] if cat_receita else None)
+                            ], width=4),
+                            
+                            dbc.Col([
+                                html.Label("Destinar para Plano (opcional)"),
+                                dcc.Dropdown(id="select_plano_receita", 
+                                    placeholder="Nenhum (receita geral)",
+                                    clearable=True)
                             ], width=4)
                         ], className="mb-3"),
                         
@@ -272,6 +284,7 @@ layout = dbc.Col([
                 [
                     dbc.NavLink("Dashboard", href="/dashboards", active="exact"),
                     dbc.NavLink("Extratos", href="/extratos", active="exact"),
+                    dbc.NavLink("Planos e Metas", href="/planos", active="exact"),
                 ], vertical=True, pills=True, id='nav_buttons', style={"margin-bottom": "10px"}),
             
             # Link Admin (condicional - será exibido apenas para admins via callback)
@@ -315,6 +328,19 @@ def do_logout(n_clicks):
     if n_clicks:
         return None, '/login'
     return dash.no_update, dash.no_update
+
+# Carregar planos no dropdown de receita
+@app.callback(
+    Output("select_plano_receita", "options"),
+    Input("store-user", "data")
+)
+def load_planos_receita(user):
+    if not user or 'id' not in user:
+        return []
+    
+    from db import get_planos_by_user
+    planos = get_planos_by_user(user['id'])
+    return [{"label": plano['nome'], "value": plano['id']} for plano in planos]
 
 # Pop-up receita
 @app.callback(
@@ -543,12 +569,13 @@ def add_category_receita(n, n2, is_open, txt, check_delete, data, user, refresh_
         State("date-receitas", "date"),
         State("switches-input-receita", "value"),
         State("select_receita", "value"),
+        State("select_plano_receita", "value"),
         State('store-receitas', 'data'),
         State('store-user', 'data'),
         State('store-refresh-receitas', 'data')
     ]
 )
-def salve_form_receita(n, descricao, valor, date, switches, categoria, dict_receitas, user, refresh_receitas):
+def salve_form_receita(n, descricao, valor, date, switches, categoria, plano_id, dict_receitas, user, refresh_receitas):
     # garante colunas esperadas e insere linha de forma segura
     expected_cols = ['Valor', 'Efetuado', 'Fixo', 'Data', 'Categoria', 'Descrição', 'user_id']
     df_receitas = pd.DataFrame(dict_receitas)
@@ -570,7 +597,7 @@ def salve_form_receita(n, descricao, valor, date, switches, categoria, dict_rece
         user_id = user['id'] if user and 'id' in user else None
 
         # Insere apenas a nova transação no DB associada ao usuário
-        insert_transacao('receitas', valor, recebido, fixo, date_iso, categoria, descricao, user_id)
+        insert_transacao('receitas', valor, recebido, fixo, date_iso, categoria, descricao, user_id, plano_id)
 
         # sinaliza reload para store 'store-receitas'
         return (refresh_receitas or 0) + 1
