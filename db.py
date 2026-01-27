@@ -48,8 +48,6 @@ def get_autoincrement_sql():
 def get_placeholder(index=None):
     """Retorna o placeholder correto para queries parametrizadas"""
     if DB_TYPE == 'postgresql':
-        if index is not None:
-            return f'${index}'
         return '%s'
     else:
         return '?'
@@ -58,12 +56,8 @@ def get_placeholder(index=None):
 def convert_query_placeholders(query, num_params=None):
     """Converte placeholders ? para o formato correto do banco"""
     if DB_TYPE == 'postgresql':
-        if num_params is None:
-            # Conta quantos ? existem
-            num_params = query.count('?')
-        # Substitui ? por $1, $2, $3, etc
-        for i in range(num_params, 0, -1):
-            query = query.replace('?', f'${i}', 1)
+        # psycopg2 usa %s para placeholders
+        query = query.replace('?', '%s')
     return query
 
 
