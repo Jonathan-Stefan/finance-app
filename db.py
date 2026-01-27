@@ -327,15 +327,30 @@ def migrate_efetuado_to_status(conn=None):
     cur = conn.cursor()
     
     # Verifica se a coluna Efetuado existe
-    cur.execute("PRAGMA table_info(despesas)")
-    columns = [row[1] for row in cur.fetchall()]
+    if DB_TYPE == 'postgresql':
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'despesas'
+        """)
+        columns = [row[0] for row in cur.fetchall()]
+    else:
+        cur.execute("PRAGMA table_info(despesas)")
+        columns = [row[1] for row in cur.fetchall()]
     
-    if 'Efetuado' in columns:
+    # Verifica case-insensitive para PostgreSQL
+    efetuado_exists = 'Efetuado' in columns or 'efetuado' in columns
+    
+    if efetuado_exists:
         # Migra apenas registros onde Status está NULL ou vazio
         # Efetuado = 1 -> "Pago"
         # Efetuado = 0 -> "A vencer"
-        cur.execute("UPDATE despesas SET Status = 'Pago' WHERE (Status IS NULL OR Status = '') AND Efetuado = 1")
-        cur.execute("UPDATE despesas SET Status = 'A vencer' WHERE (Status IS NULL OR Status = '') AND Efetuado = 0")
+        if DB_TYPE == 'postgresql':
+            cur.execute("UPDATE despesas SET status = 'Pago' WHERE (status IS NULL OR status = '') AND efetuado = 1")
+            cur.execute("UPDATE despesas SET status = 'A vencer' WHERE (status IS NULL OR status = '') AND efetuado = 0")
+        else:
+            cur.execute("UPDATE despesas SET Status = 'Pago' WHERE (Status IS NULL OR Status = '') AND Efetuado = 1")
+            cur.execute("UPDATE despesas SET Status = 'A vencer' WHERE (Status IS NULL OR Status = '') AND Efetuado = 0")
         conn.commit()
     
     if close:
@@ -349,10 +364,16 @@ def update_status_vencidos(user_id=None):
     cur = conn.cursor()
     hoje = datetime.now().strftime('%Y-%m-%d')
     
-    if user_id:
-        cur.execute("UPDATE despesas SET Status = 'Vencido' WHERE Status = 'A vencer' AND Data < ? AND user_id = ?", (hoje, user_id))
+    if DB_TYPE == 'postgresql':
+        if user_id:
+            cur.execute("UPDATE despesas SET status = 'Vencido' WHERE status = 'A vencer' AND data < %s AND user_id = %s", (hoje, user_id))
+        else:
+            cur.execute("UPDATE despesas SET status = 'Vencido' WHERE status = 'A vencer' AND data < %s", (hoje,))
     else:
-        cur.execute("UPDATE despesas SET Status = 'Vencido' WHERE Status = 'A vencer' AND Data < ?", (hoje,))
+        if user_id:
+            cur.execute("UPDATE despesas SET Status = 'Vencido' WHERE Status = 'A vencer' AND Data < ? AND user_id = ?", (hoje, user_id))
+        else:
+            cur.execute("UPDATE despesas SET Status = 'Vencido' WHERE Status = 'A vencer' AND Data < ?", (hoje,))
     
     conn.commit()
     conn.close()
