@@ -7,7 +7,7 @@ import os
 # Detectar ambiente e tipo de banco de dados
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-if DATABASE_URL:
+if DATABASE_URL and (DATABASE_URL.startswith('postgres://') or DATABASE_URL.startswith('postgresql://')):
     # PostgreSQL no Render
     import psycopg2
     from psycopg2.extras import RealDictCursor
