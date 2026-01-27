@@ -2,22 +2,80 @@ import sqlite3
 import pandas as pd
 from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
+import os
 
-DB_PATH = Path(__file__).resolve().parent / "finance.db"
+# Detectar ambiente e tipo de banco de dados
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+if DATABASE_URL:
+    # PostgreSQL no Render
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    # Fix: Render usa postgres:// mas psycopg2 precisa de postgresql://
+    if DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    DB_TYPE = 'postgresql'
+else:
+    # SQLite local
+    DB_PATH = Path(__file__).resolve().parent / "finance.db"
+    DB_TYPE = 'sqlite'
 
 
 def connect_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    return conn
+    """Conecta ao banco de dados (PostgreSQL ou SQLite)"""
+    if DB_TYPE == 'postgresql':
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            print('[DB] Usando PostgreSQL (Render)')
+            return conn
+        except Exception as e:
+            print(f'[DB] ERRO ao conectar PostgreSQL: {e}')
+            raise
+    else:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        print(f'[DB] Usando SQLite local: {DB_PATH}')
+        return conn
+
+
+def get_autoincrement_sql():
+    """Retorna o SQL correto para auto-incremento dependendo do banco"""
+    if DB_TYPE == 'postgresql':
+        return 'SERIAL PRIMARY KEY'
+    else:
+        return 'INTEGER PRIMARY KEY AUTOINCREMENT'
+
+
+def get_placeholder(index=None):
+    """Retorna o placeholder correto para queries parametrizadas"""
+    if DB_TYPE == 'postgresql':
+        if index is not None:
+            return f'${index}'
+        return '%s'
+    else:
+        return '?'
+
+
+def convert_query_placeholders(query, num_params=None):
+    """Converte placeholders ? para o formato correto do banco"""
+    if DB_TYPE == 'postgresql':
+        if num_params is None:
+            # Conta quantos ? existem
+            num_params = query.count('?')
+        # Substitui ? por $1, $2, $3, etc
+        for i in range(num_params, 0, -1):
+            query = query.replace('?', f'${i}', 1)
+    return query
 
 
 def init_db():
     conn = connect_db()
     cur = conn.cursor()
+    
+    autoincrement = get_autoincrement_sql()
 
     # Users table
-    cur.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS users (
+        id {autoincrement},
         username TEXT UNIQUE,
         password_hash TEXT,
         is_admin INTEGER DEFAULT 0,
@@ -25,19 +83,20 @@ def init_db():
     )""")
 
     # Escolhemos adicionar user_id nas outras tabelas para associar registros a usuários
-    cur.execute("""CREATE TABLE IF NOT EXISTS receitas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS receitas (
+        id {autoincrement},
         Valor REAL,
         Efetuado INTEGER,
         Fixo INTEGER,
         Data TEXT,
         Categoria TEXT,
         Descrição TEXT,
-        user_id INTEGER
+        user_id INTEGER,
+        plano_id INTEGER
     )""")
 
-    cur.execute("""CREATE TABLE IF NOT EXISTS despesas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS despesas (
+        id {autoincrement},
         Valor REAL,
         Status TEXT,
         Fixo INTEGER,
@@ -47,14 +106,14 @@ def init_db():
         user_id INTEGER
     )""")
 
-    cur.execute("""CREATE TABLE IF NOT EXISTS cat_receita (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS cat_receita (
+        id {autoincrement},
         Categoria TEXT,
         user_id INTEGER
     )""")
 
-    cur.execute("""CREATE TABLE IF NOT EXISTS cat_despesa (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS cat_despesa (
+        id {autoincrement},
         Categoria TEXT,
         user_id INTEGER
     )""")
@@ -125,8 +184,13 @@ def init_db():
 
 def table_to_df(table, user_id=None, include_id=False):
     conn = connect_db()
+    
     if user_id is not None:
-        df = pd.read_sql_query(f"SELECT * FROM {table} WHERE user_id = ?", conn, params=(user_id,))
+        # Usar marcador de parâmetro correto para cada banco
+        if DB_TYPE == 'postgresql':
+            df = pd.read_sql_query(f"SELECT * FROM {table} WHERE user_id = %s", conn, params=(user_id,))
+        else:
+            df = pd.read_sql_query(f"SELECT * FROM {table} WHERE user_id = ?", conn, params=(user_id,))
     else:
         df = pd.read_sql_query(f"SELECT * FROM {table}", conn)
     conn.close()
@@ -152,13 +216,27 @@ def df_to_table(df, table):
 # ---------- Helpers para usuários e operações por usuário ---------- #
 
 def add_column_if_missing(conn, table, column_def):
+    """Adiciona coluna se não existir - compatível com SQLite e PostgreSQL"""
     cur = conn.cursor()
     col_name = column_def.split()[0]
-    cur.execute(f"PRAGMA table_info({table})")
-    cols = [row[1] for row in cur.fetchall()]
-    if col_name not in cols:
-        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
-        conn.commit()
+    
+    if DB_TYPE == 'postgresql':
+        # PostgreSQL: verificar se coluna existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = %s AND column_name = %s
+        """, (table, col_name))
+        if not cur.fetchone():
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+            conn.commit()
+    else:
+        # SQLite: usar PRAGMA
+        cur.execute(f"PRAGMA table_info({table})")
+        cols = [row[1] for row in cur.fetchall()]
+        if col_name not in cols:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+            conn.commit()
 
 
 def get_user_count(conn=None):
