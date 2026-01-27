@@ -221,11 +221,11 @@ def add_column_if_missing(conn, table, column_def):
     col_name = column_def.split()[0]
     
     if DB_TYPE == 'postgresql':
-        # PostgreSQL: verificar se coluna existe
+        # PostgreSQL: verificar se coluna existe (case-insensitive)
         cur.execute("""
             SELECT column_name 
             FROM information_schema.columns 
-            WHERE table_name = %s AND column_name = %s
+            WHERE table_name = %s AND column_name = LOWER(%s)
         """, (table, col_name))
         if not cur.fetchone():
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
