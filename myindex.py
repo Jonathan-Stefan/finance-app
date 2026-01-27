@@ -116,6 +116,8 @@ def render_page_content(pathname, user):
 def reload_user_stores(user, r_rec, r_des, r_cat_rec, r_cat_des):
     user_id = user['id'] if user and 'id' in user else None
     from db import table_to_df, update_status_vencidos
+    
+    print(f"[RELOAD_STORES] user_id={user_id}, r_rec={r_rec}, r_des={r_des}, r_cat_rec={r_cat_rec}, r_cat_des={r_cat_des}")
 
     if user_id is None:
         return {}, {}, {}, {}
@@ -127,6 +129,8 @@ def reload_user_stores(user, r_rec, r_des, r_cat_rec, r_cat_des):
     df_despesas = table_to_df('despesas', user_id=user_id, include_id=True).to_dict('records')
     list_receitas = table_to_df('cat_receita', user_id=user_id).to_dict('records')
     list_despesas = table_to_df('cat_despesa', user_id=user_id).to_dict('records')
+    
+    print(f"[RELOAD_STORES] Carregadas {len(list_despesas)} categorias de despesa e {len(list_receitas)} categorias de receita")
 
     return df_receitas, df_despesas, list_receitas, list_despesas
 

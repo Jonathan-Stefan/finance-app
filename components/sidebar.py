@@ -436,14 +436,19 @@ def load_saved_avatar(user):
     State('store-refresh-cat-despesas', 'data')]
 )
 def add_category_despesa(n, n2, is_open, txt, check_delete, data, user, refresh_cat_despesas):
+    import dash
     txt1 = []
     style1 = {}
     user_id = user['id'] if user and 'id' in user else None
+    
+    triggered = dash.callback_context.triggered_id
+    print(f"[CALLBACK] add_category_despesa - TRIGGERED: {triggered}, n={n}, n2={n2}, txt='{txt}', user_id={user_id}, refresh_cat_despesas={refresh_cat_despesas}")
 
     # lista atual baseada no store (que já deve ser do usuário) ou vazia
     cat_despesa = [item['Categoria'] for item in data if 'Categoria' in item] if data else []
 
-    if n:
+    if n and triggered == "add-category-despesa":
+        print(f"[CALLBACK] Botão 'Adicionar' foi clicado!")
         if user_id is None:
             txt1 = "Faça login para adicionar categorias."
             style1 = {'color': 'red'}
@@ -452,14 +457,17 @@ def add_category_despesa(n, n2, is_open, txt, check_delete, data, user, refresh_
             style1 = {'color': 'red'}
         else:
             try:
+                print(f"[CALLBACK] Tentando inserir categoria '{txt}' para user_id={user_id}")
                 insert_cat('cat_despesa', txt, user_id)
                 txt1 = f'A categoria {txt} foi adicionada com sucesso!'
                 style1 = {'color': 'green'}
             except Exception as e:
+                print(f"[CALLBACK] Erro ao inserir categoria: {e}")
                 txt1 = f'Erro ao adicionar categoria: {e}'
                 style1 = {'color': 'red'}
 
-    if n2:
+    if n2 and triggered == "remove-category-despesa":
+        print(f"[CALLBACK] Botão 'Remover' foi clicado!")
         if user_id is None:
             txt1 = "Faça login para remover categorias."
             style1 = {'color': 'red'}
@@ -470,8 +478,17 @@ def add_category_despesa(n, n2, is_open, txt, check_delete, data, user, refresh_
     # atualiza lista completa de categorias apenas do usuário
     if user_id is None:
         df_cat_despesa = pd.DataFrame(columns=['Categoria'])
+        print(f"[CALLBACK] user_id é None, usando DataFrame vazio")
     else:
         df_cat_despesa = table_to_df('cat_despesa', user_id=user_id)
+        print(f"[CALLBACK] table_to_df retornou: shape={df_cat_despesa.shape}, columns={df_cat_despesa.columns.tolist()}, empty={df_cat_despesa.empty}")
+        if not df_cat_despesa.empty:
+            print(f"[CALLBACK] Primeiras linhas do DataFrame:\n{df_cat_despesa.head()}")
+        
+        if df_cat_despesa.empty or 'Categoria' not in df_cat_despesa.columns:
+            print(f"[CALLBACK] DataFrame vazio ou sem coluna Categoria, criando vazio")
+            df_cat_despesa = pd.DataFrame(columns=['Categoria'])
+    
     opt_despesa = [{"label": i, "value": i} for i in df_cat_despesa['Categoria'].tolist()]
     selected_value = opt_despesa[0]["value"] if opt_despesa else None
 
@@ -483,6 +500,8 @@ def add_category_despesa(n, n2, is_open, txt, check_delete, data, user, refresh_
         new_refresh = (refresh_cat_despesas or 0) + 1
     else:
         new_refresh = refresh_cat_despesas
+    
+    print(f"[CALLBACK] add_category_despesa - triggered_id={triggered_id}, new_refresh={new_refresh}, opt_despesa={opt_despesa}")
 
     return [txt1, style1, opt_despesa, selected_value, opt_despesa, [], new_refresh]
 
@@ -543,6 +562,9 @@ def add_category_receita(n, n2, is_open, txt, check_delete, data, user, refresh_
         df_cat_receita = pd.DataFrame(columns=['Categoria'])
     else:
         df_cat_receita = table_to_df('cat_receita', user_id=user_id)
+        if df_cat_receita.empty or 'Categoria' not in df_cat_receita.columns:
+            df_cat_receita = pd.DataFrame(columns=['Categoria'])
+    
     opt_receita = [{"label": i, "value": i} for i in df_cat_receita['Categoria'].tolist()]
     selected_value = opt_receita[0]["value"] if opt_receita else None
 
