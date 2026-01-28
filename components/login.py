@@ -5,6 +5,7 @@ import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 from dash import no_update
 
+
 from app import app
 from db import verify_user, create_user
 
@@ -16,7 +17,28 @@ layout = html.Div([
             dbc.Input(id='login-username', type='text'),
 
             dbc.Label("Senha", style={'margin-top': '10px'}),
-            dbc.Input(id='login-password', type='password'),
+            html.Div([
+                dbc.Input(
+                    id='login-password',
+                    type='password',
+                    style={'paddingRight': '40px'}
+                ),
+                html.I(
+                    id='toggle-login-password-icon',
+                    className="fas fa-eye",
+                    n_clicks=0,
+                    style={
+                        'position': 'absolute',
+                        'right': '12px',
+                        'top': '50%',
+                        'transform': 'translateY(-50%)',
+                        'cursor': 'pointer',
+                        'fontSize': '16px',
+                        'color': '#6c757d',
+                        'zIndex': 10
+                    }
+                )
+            ], style={'position': 'relative'}),
 
             html.Div(id='login-message', style={'margin-top': '10px'}),
 
@@ -26,12 +48,29 @@ layout = html.Div([
 
             html.P("Ainda não tem conta?"),
             dbc.Input(id='register-username', type='text', placeholder='Novo usuário'),
-            dbc.Input(
-                id='register-password',
-                type='password',
-                placeholder='Nova senha',
-                style={'margin-top': '5px'}
-            ),
+            html.Div([
+                dbc.Input(
+                    id='register-password',
+                    type='password',
+                    placeholder='Nova senha',
+                    style={'paddingRight': '40px'}
+                ),
+                html.I(
+                    id='toggle-register-password-icon',
+                    className="fas fa-eye",
+                    n_clicks=0,
+                    style={
+                        'position': 'absolute',
+                        'right': '12px',
+                        'top': '50%',
+                        'transform': 'translateY(-50%)',
+                        'cursor': 'pointer',
+                        'fontSize': '16px',
+                        'color': '#6c757d',
+                        'zIndex': 10
+                    }
+                )
+            ], style={'position': 'relative', 'margin-top': '5px'}),
             dbc.Button('Registrar', id='register-button', color='secondary', style={'margin-top': '10px'}),
 
             html.Div(id='register-message', style={'margin-top': '10px'})
@@ -79,3 +118,27 @@ def do_register(n, username, password):
         return 'Erro ao criar usuário.'
     except Exception as e:
         return f'Erro: {e}'
+
+@app.callback(
+    Output('login-password', 'type'),
+    Output('toggle-login-password-icon', 'className'),
+    Input('toggle-login-password-icon', 'n_clicks'),
+    prevent_initial_call=False
+)
+def toggle_login_password_visibility(n_clicks):
+    if n_clicks % 2 == 0:
+        return 'password', 'fas fa-eye'
+    else:
+        return 'text', 'fas fa-eye-slash'
+
+@app.callback(
+    Output('register-password', 'type'),
+    Output('toggle-register-password-icon', 'className'),
+    Input('toggle-register-password-icon', 'n_clicks'),
+    prevent_initial_call=False
+)
+def toggle_register_password_visibility(n_clicks):
+    if n_clicks % 2 == 0:
+        return 'password', 'fas fa-eye'
+    else:
+        return 'text', 'fas fa-eye-slash'
