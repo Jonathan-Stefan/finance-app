@@ -234,6 +234,25 @@ layout = dbc.Col([
                             ], width=4)
                         ]),
                         
+                        # Campo de parcelas que aparece apenas quando "Despesa Recorrente" está marcado
+                        html.Div(id="parcelas-container", children=[
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label("Número de Parcelas"),
+                                    dbc.Input(
+                                        id="input-parcelas",
+                                        type="number",
+                                        min=1,
+                                        max=120,
+                                        step=1,
+                                        placeholder="Ex: 12",
+                                        value=1
+                                    ),
+                                    dbc.FormText("Quantas vezes essa despesa se repetirá nos próximos meses?")
+                                ], width=6)
+                            ], className="mb-3")
+                        ], style={'display': 'none'}),  # Inicialmente escondido
+                        
                         dbc.Row([
                             dbc.Accordion([
                                     dbc.AccordionItem(children=[
@@ -361,6 +380,16 @@ def toggle_modal(n1, is_open):
 def toggle_modal(n1, is_open):
     if n1:
         return not is_open
+
+# Mostrar/esconder campo de parcelas quando marcar despesa recorrente
+@app.callback(
+    Output("parcelas-container", "style"),
+    Input("switches-input-despesa", "value")
+)
+def toggle_parcelas_field(switches):
+    if 2 in switches:  # 2 é o valor para "Despesa Recorrente"
+        return {'display': 'block'}
+    return {'display': 'none'}
 
 # Pop-up perfis
 @app.callback(
@@ -640,11 +669,12 @@ def salve_form_receita(n, descricao, valor, date, switches, categoria, plano_id,
         State("switches-input-despesa", "value"),
         State("select_despesa", "value"),
         State("select-status-despesa", "value"),
+        State("input-parcelas", "value"),
         State('store-despesas', 'data'),
         State('store-user', 'data'),
         State('store-refresh-despesas', 'data')
     ])
-def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, dict_despesas, user, refresh_despesas):
+def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, num_parcelas, dict_despesas, user, refresh_despesas):
     # garante colunas esperadas e insere linha de forma segura
     expected_cols = ['Valor', 'Status', 'Fixo', 'Data', 'Categoria', 'Descrição', 'user_id']
     df_despesas = pd.DataFrame(dict_despesas)
@@ -664,8 +694,14 @@ def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, d
         descricao = descricao if descricao not in (None, "") else 0
         user_id = user['id'] if user and 'id' in user else None
 
-        # Insere apenas a nova transação no DB associada ao usuário (com Status)
-        insert_transacao('despesas', valor, status, fixo, date_iso, categoria, descricao, user_id)
+        # Verifica se é despesa recorrente com parcelas
+        if fixo == 1 and num_parcelas and int(num_parcelas) > 1:
+            # Usa a função de inserção parcelada
+            from db import insert_despesa_parcelada
+            insert_despesa_parcelada(valor, status, fixo, date_iso, categoria, descricao, user_id, int(num_parcelas))
+        else:
+            # Insere apenas uma transação no DB associada ao usuário (com Status)
+            insert_transacao('despesas', valor, status, fixo, date_iso, categoria, descricao, user_id)
 
         # sinaliza reload para store 'store-despesas'
         return (refresh_despesas or 0) + 1

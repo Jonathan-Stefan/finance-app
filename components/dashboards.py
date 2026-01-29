@@ -140,8 +140,10 @@ layout = dbc.Col([
 @app.callback([Output("dropdown-receita", "options"),
     Output("dropdown-receita", "value"),
     Output("p-receita-dashboards", "children")],
-    Input("store-receitas", "data"))
-def populate_dropdownvalues_receitas(data):
+    [Input("store-receitas", "data"),
+    Input('date-picker-config', 'start_date'),
+    Input('date-picker-config', 'end_date')])
+def populate_dropdownvalues_receitas(data, start_date, end_date):
     df = pd.DataFrame(data)
     
     # Excluir receitas que são destinadas a planos específicos
@@ -150,6 +152,15 @@ def populate_dropdownvalues_receitas(data):
     
     if df.empty or 'Categoria' not in df.columns or 'Valor' not in df.columns:
         return [[], [], "R$ 0"]
+    
+    # Filtrar por período se houver dados de data
+    if 'Data' in df.columns and start_date and end_date:
+        df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+        start = pd.to_datetime(start_date, errors='coerce')
+        end = pd.to_datetime(end_date, errors='coerce')
+        if not pd.isna(start) and not pd.isna(end):
+            mask = (df['Data'] >= start) & (df['Data'] <= end)
+            df = df.loc[mask]
     
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
@@ -160,12 +171,23 @@ def populate_dropdownvalues_receitas(data):
 @app.callback([Output("dropdown-despesa", "options"),
     Output("dropdown-despesa", "value"),
     Output("p-despesa-dashboards", "children")],
-    Input("store-despesas", "data"))
-def populate_dropdownvalues_despesas(data):
+    [Input("store-despesas", "data"),
+    Input('date-picker-config', 'start_date'),
+    Input('date-picker-config', 'end_date')])
+def populate_dropdownvalues_despesas(data, start_date, end_date):
     df = pd.DataFrame(data)
     
     if df.empty or 'Categoria' not in df.columns or 'Valor' not in df.columns:
         return [[], [], "R$ 0"]
+    
+    # Filtrar por período se houver dados de data
+    if 'Data' in df.columns and start_date and end_date:
+        df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+        start = pd.to_datetime(start_date, errors='coerce')
+        end = pd.to_datetime(end_date, errors='coerce')
+        if not pd.isna(start) and not pd.isna(end):
+            mask = (df['Data'] >= start) & (df['Data'] <= end)
+            df = df.loc[mask]
     
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
@@ -176,14 +198,34 @@ def populate_dropdownvalues_despesas(data):
 @app.callback(
     Output("p-saldo-dashboards", "children"),
     [Input("store-despesas", "data"),
-    Input("store-receitas", "data")])
-def saldo_total(despesas, receitas):
+    Input("store-receitas", "data"),
+    Input('date-picker-config', 'start_date'),
+    Input('date-picker-config', 'end_date')])
+def saldo_total(despesas, receitas, start_date, end_date):
     df_despesas = pd.DataFrame(despesas)
     df_receitas = pd.DataFrame(receitas)
     
     # Excluir receitas que são destinadas a planos específicos
     if not df_receitas.empty and 'plano_id' in df_receitas.columns:
         df_receitas = df_receitas[df_receitas['plano_id'].isna()]
+    
+    # Filtrar despesas por período
+    if not df_despesas.empty and 'Data' in df_despesas.columns and start_date and end_date:
+        df_despesas['Data'] = pd.to_datetime(df_despesas['Data'], errors='coerce')
+        start = pd.to_datetime(start_date, errors='coerce')
+        end = pd.to_datetime(end_date, errors='coerce')
+        if not pd.isna(start) and not pd.isna(end):
+            mask = (df_despesas['Data'] >= start) & (df_despesas['Data'] <= end)
+            df_despesas = df_despesas.loc[mask]
+    
+    # Filtrar receitas por período
+    if not df_receitas.empty and 'Data' in df_receitas.columns and start_date and end_date:
+        df_receitas['Data'] = pd.to_datetime(df_receitas['Data'], errors='coerce')
+        start = pd.to_datetime(start_date, errors='coerce')
+        end = pd.to_datetime(end_date, errors='coerce')
+        if not pd.isna(start) and not pd.isna(end):
+            mask = (df_receitas['Data'] >= start) & (df_receitas['Data'] <= end)
+            df_receitas = df_receitas.loc[mask]
 
     valor_despesas = df_despesas['Valor'].sum() if not df_despesas.empty and 'Valor' in df_despesas.columns else 0
     valor_receitas = df_receitas['Valor'].sum() if not df_receitas.empty and 'Valor' in df_receitas.columns else 0

@@ -400,6 +400,40 @@ def delete_transacao(table, row_id, user_id):
     conn.close()
 
 
+def insert_despesa_parcelada(valor, status, fixo, data, categoria, descricao, user_id, num_parcelas):
+    """Insere despesas parceladas nos meses subsequentes"""
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
+    
+    conn = connect_db()
+    cur = conn.cursor()
+    
+    # Converte a data string para datetime
+    data_inicial = datetime.strptime(data, '%Y-%m-%d')
+    
+    # Insere cada parcela
+    for i in range(num_parcelas):
+        # Calcula a data da parcela (adiciona i meses à data inicial)
+        data_parcela = data_inicial + relativedelta(months=i)
+        data_parcela_str = data_parcela.strftime('%Y-%m-%d')
+        
+        # Atualiza a descrição para incluir o número da parcela
+        if num_parcelas > 1:
+            descricao_parcela = f"{descricao} - Parcela {i+1}/{num_parcelas}"
+        else:
+            descricao_parcela = descricao
+        
+        # Insere a parcela
+        cur.execute(
+            "INSERT INTO despesas (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (valor, status, fixo, data_parcela_str, categoria, descricao_parcela, user_id)
+        )
+    
+    conn.commit()
+    conn.close()
+    print(f"[DB] Inseridas {num_parcelas} parcelas de despesa para o usuário {user_id}")
+
+
 def backfill_usernames(conn=None):
     """Preenche a coluna username nas tabelas receitas e despesas"""
     close = False
