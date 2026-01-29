@@ -89,6 +89,17 @@ def init_db():
         user_id INTEGER
     )""")
 
+    # Orçamentos por categoria
+    cur.execute("""CREATE TABLE IF NOT EXISTS orcamentos (
+        id SERIAL PRIMARY KEY,
+        categoria TEXT,
+        valor_limite REAL,
+        mes INTEGER,
+        ano INTEGER,
+        user_id INTEGER,
+        UNIQUE(categoria, mes, ano, user_id)
+    )""")
+
     conn.commit()
 
     # Se não houver usuários, cria um admin padrão
@@ -432,6 +443,86 @@ def insert_despesa_parcelada(valor, status, fixo, data, categoria, descricao, us
     conn.commit()
     conn.close()
     print(f"[DB] Inseridas {num_parcelas} parcelas de despesa para o usuário {user_id}")
+
+
+# ---------- Funções de Orçamento ---------- #
+
+def set_orcamento(categoria, valor_limite, mes, ano, user_id):
+    """Define ou atualiza orçamento para uma categoria em um mês/ano específico"""
+    conn = connect_db()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO orcamentos (categoria, valor_limite, mes, ano, user_id) 
+               VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT (categoria, mes, ano, user_id) 
+               DO UPDATE SET valor_limite = EXCLUDED.valor_limite""",
+            (categoria, valor_limite, mes, ano, user_id)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"[DB] Erro ao definir orçamento: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+def get_orcamentos(user_id, mes=None, ano=None):
+    """Retorna orçamentos do usuário, opcionalmente filtrados por mês/ano"""
+    conn = connect_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    if mes and ano:
+        cur.execute(
+            "SELECT * FROM orcamentos WHERE user_id = %s AND mes = %s AND ano = %s ORDER BY categoria",
+            (user_id, mes, ano)
+        )
+    else:
+        cur.execute(
+            "SELECT * FROM orcamentos WHERE user_id = %s ORDER BY ano DESC, mes DESC, categoria",
+            (user_id,)
+        )
+    
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def delete_orcamento(orcamento_id, user_id):
+    """Deleta orçamento específico"""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM orcamentos WHERE id = %s AND user_id = %s", (orcamento_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_gastos_por_categoria(user_id, mes, ano):
+    """Retorna total gasto por categoria em um mês/ano específico"""
+    conn = connect_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Calcula primeiro e último dia do mês
+    from datetime import date
+    primeiro_dia = date(ano, mes, 1).strftime('%Y-%m-%d')
+    if mes == 12:
+        ultimo_dia = date(ano, 12, 31).strftime('%Y-%m-%d')
+    else:
+        from datetime import timedelta
+        ultimo_dia = (date(ano, mes + 1, 1) - timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    cur.execute(
+        """SELECT categoria, SUM(valor) as total_gasto
+           FROM despesas
+           WHERE user_id = %s AND data >= %s AND data <= %s
+           GROUP BY categoria""",
+        (user_id, primeiro_dia, ultimo_dia)
+    )
+    
+    rows = cur.fetchall()
+    conn.close()
+    return {row['categoria']: row['total_gasto'] for row in rows}
 
 
 def backfill_usernames(conn=None):

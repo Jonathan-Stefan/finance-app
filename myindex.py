@@ -7,7 +7,7 @@ import plotly.express as px
 
 # import from folders
 from app import *
-from components import sidebar, dashboards, extratos, login, admin, planos
+from components import sidebar, dashboards, extratos, login, admin, planos, orcamentos
 from globals import *
 
 # DataFrames and Dcc.Store (loaded from SQLite)
@@ -83,6 +83,9 @@ def render_page_content(pathname, user):
     
     if pathname == "/planos":
         return planos.layout
+    
+    if pathname == "/orcamentos":
+        return orcamentos.layout
     
     if pathname == "/admin":
         # Verifica se o usuário é admin

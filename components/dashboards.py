@@ -51,7 +51,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], width=4),
+            ], xs=12, sm=12, md=4, lg=4),
 
             # Receita
             dbc.Col([
@@ -66,7 +66,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], width=4),
+            ], xs=12, sm=12, md=4, lg=4),
 
             # Despesa
             dbc.Col([
@@ -81,8 +81,15 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], width=4),
-        ], style={"margin": "10px"}),
+            ], xs=12, sm=12, md=4, lg=4),
+        ], className="g-2 mb-2"),
+
+        # Alertas de Orçamento
+        dbc.Row([
+            dbc.Col([
+                html.Div(id="alertas-orcamento")
+            ], width=12)
+        ], className="mb-2"),
 
         dbc.Row([
             dbc.Col([
@@ -118,19 +125,19 @@ layout = dbc.Col([
                         updatemode='singledate',
                         id='date-picker-config',
                         style={'z-index': '100'}),
-                ], style={"padding": "20px", "height": "98%"}), 
-            ], width=4),
+                ], style={"padding": "20px"}), 
+            ], xs=12, sm=12, md=12, lg=4, className="mb-3"),
 
             dbc.Col(
-                dbc.Card(dcc.Graph(id="graph1"), style={"padding": "10px"}), width=8
+                dbc.Card(dcc.Graph(id="graph1"), style={"padding": "10px"}), xs=12, sm=12, md=12, lg=8, className="mb-3"
             ),
-        ], style={"margin": "10px"}),
+        ], className="g-2"),
 
         dbc.Row([
-            dbc.Col(dbc.Card(dcc.Graph(id="graph2"), style={"padding": "10px"}), width=6),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph3"), style={"padding": "10px"}), width=3),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph4"), style={"padding": "10px"}), width=3),
-        ], style={"margin": "10px"})
+            dbc.Col(dbc.Card(dcc.Graph(id="graph2"), style={"padding": "10px"}), xs=12, sm=12, md=12, lg=6, className="mb-3"),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph3"), style={"padding": "10px"}), xs=12, sm=6, md=6, lg=3, className="mb-3"),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph4"), style={"padding": "10px"}), xs=12, sm=6, md=6, lg=3, className="mb-3"),
+        ], className="g-2")
     ])
 
 
@@ -438,3 +445,73 @@ def pie_despesa(data_despesa, despesa, theme):
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
 
     return fig
+
+
+# Alertas de Orçamento
+@app.callback(
+    Output("alertas-orcamento", "children"),
+    [Input("store-despesas", "data"),
+     Input("store-user", "data"),
+     Input('date-picker-config', 'start_date'),
+     Input('date-picker-config', 'end_date')]
+)
+def mostrar_alertas_orcamento(despesas, user, start_date, end_date):
+    if not user or 'id' not in user:
+        return None
+    
+    from db import get_orcamentos, get_gastos_por_categoria
+    
+    # Pegar mês e ano do período selecionado
+    try:
+        data_inicio = pd.to_datetime(start_date)
+        mes = data_inicio.month
+        ano = data_inicio.year
+    except:
+        mes = datetime.now().month
+        ano = datetime.now().year
+    
+    # Buscar orçamentos
+    orcamentos = get_orcamentos(user['id'], mes, ano)
+    
+    if not orcamentos:
+        return None
+    
+    # Buscar gastos
+    gastos = get_gastos_por_categoria(user['id'], mes, ano)
+    
+    # Criar alertas
+    alertas = []
+    for orc in orcamentos:
+        categoria = orc['categoria']
+        limite = orc['valor_limite']
+        gasto = gastos.get(categoria, 0)
+        percentual = (gasto / limite * 100) if limite > 0 else 0
+        
+        # Mostrar apenas orçamentos em alerta (>= 80%)
+        if percentual >= 80:
+            if percentual >= 100:
+                cor = "danger"
+                icone = "🚨"
+                mensagem = f"{icone} {categoria}: R$ {gasto:.2f} / R$ {limite:.2f} - LIMITE EXCEDIDO!"
+            else:
+                cor = "warning"
+                icone = "⚠️"
+                mensagem = f"{icone} {categoria}: R$ {gasto:.2f} / R$ {limite:.2f} - {percentual:.0f}% do orçamento"
+            
+            alertas.append(
+                dbc.Col([
+                    dbc.Alert([
+                        html.Strong(mensagem),
+                        dbc.Progress(
+                            value=min(percentual, 100),
+                            color=cor,
+                            style={"height": "10px", "margin-top": "5px"}
+                        )
+                    ], color=cor, className="mb-0")
+                ], xs=12, sm=6, md=4, lg=3)
+            )
+    
+    if not alertas:
+        return None
+    
+    return dbc.Row(alertas, className="g-2")
