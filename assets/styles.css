@@ -310,3 +310,78 @@
         display: block !important;
     }
 }
+/* ========= Date Picker Customiza��o ========= */
+
+/* Container do DatePicker */
+.date-picker-custom {
+    width: 100%;
+    display: block;
+}
+
+
+
+
+/* Portal do calend�rio com z-index adequado */
+.CalendarDay__selected_span,
+.CalendarDay__selected,
+.CalendarDay__hovered_span {
+    background: #007bff;
+    border: 1px solid #007bff;
+}
+
+/* Calend�rio em mobile - ocupa mais espa�o */
+@media (max-width: 576px) {
+    /* Remove conflitos de z-index */
+    .DateRangePicker_picker {
+        z-index: 9999 !important;
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        background: white;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        max-width: 95vw;
+    }
+    
+  
+    
+    /* Bot�es de navega��o do calend�rio maiores */
+    .DayPickerNavigation_button {
+        width: 44px;
+        height: 44px;
+    }
+    
+    /* Dias do calend�rio com �rea de toque maior */
+    .CalendarDay {
+        width: 44px !important;
+        height: 44px !important;
+        line-height: 44px !important;
+    }
+}
+
+/* Tema escuro para DatePicker */
+[data-bs-theme="dark"] .DateRangePicker_picker,
+.dbc.cyborg .DateRangePicker_picker {
+    background: #2c3e50;
+    color: white;
+}
+
+[data-bs-theme="dark"] .CalendarDay,
+.dbc.cyborg .CalendarDay {
+    color: white;
+    background: #2c3e50;
+}
+
+[data-bs-theme="dark"] .CalendarDay__selected,
+.dbc.cyborg .CalendarDay__selected {
+    background: #3498db;
+    border-color: #3498db;
+}
+
+[data-bs-theme="dark"] .DateInput_input,
+.dbc.cyborg .DateInput_input {
+    background: #34495e;
+    color: white;
+    border-color: #4a5f7f;
+}

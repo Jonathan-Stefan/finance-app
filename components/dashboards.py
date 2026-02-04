@@ -124,6 +124,7 @@ layout = dbc.Col([
                         with_portal=True,
                         updatemode='singledate',
                         id='date-picker-config',
+                        display_format='DD/MM/YYYY',
                         style={'z-index': '100'}),
                 ], style={"padding": "20px"}), 
             ], xs=12, sm=12, md=12, lg=4, className="mb-3"),

@@ -15,8 +15,10 @@ from db import (
     get_planos_by_user, insert_plano, update_plano, delete_plano,
     get_montantes_by_user, insert_montante, update_montante, delete_montante,
     get_anotacoes_planos, save_anotacoes_planos,
-    calculate_plano_valor_acumulado, table_to_df
+    calculate_plano_valor_acumulado, table_to_df,
+    calcular_rendimento_investimento, atualizar_valores_investimentos
 )
+from constants import TipoInvestimento, TipoRendimento, TAXA_CDI_ANUAL
 
 # =========  Layout  =========== #
 layout = dbc.Col([
@@ -177,33 +179,120 @@ layout = dbc.Col([
         ])
     ], id="modal-plano", size="lg", is_open=False, centered=True),
     
-    # Modal para adicionar montante acumulado
+    # Modal para adicionar investimento/montante
     dbc.Modal([
-        dbc.ModalHeader(dbc.ModalTitle("Adicionar Montante Acumulado")),
+        dbc.ModalHeader(dbc.ModalTitle("Adicionar Investimento", id="modal-montante-title")),
         dbc.ModalBody([
             dbc.Row([
                 dbc.Col([
                     dbc.Label("Instituição/Nome:"),
-                    dbc.Input(id="input-inst-montante", placeholder="Ex: Corretora ABC"),
+                    dbc.Input(id="input-inst-montante", placeholder="Ex: Itaú, Nubank, XP"),
                 ], width=12, className="mb-3"),
+                
                 dbc.Col([
-                    dbc.Label("Tipo:"),
+                    dbc.Label("Tipo de Investimento:"),
                     dbc.Select(
                         id="select-tipo-montante",
                         options=[
-                            {"label": "Instituição Financeira", "value": "INST. FIN."},
-                            {"label": "Participação", "value": "PARTICAÇÃO"},
-                            {"label": "Plano", "value": "PLANO"},
-                            {"label": "Principal", "value": "Principal"},
+                            {"label": "Poupança", "value": "Poupança"},
+                            {"label": "CDB", "value": "CDB"},
+                            {"label": "LCI", "value": "LCI"},
+                            {"label": "LCA", "value": "LCA"},
+                            {"label": "Tesouro Selic", "value": "Tesouro Selic"},
+                            {"label": "Tesouro IPCA+", "value": "Tesouro IPCA+"},
+                            {"label": "Tesouro Prefixado", "value": "Tesouro Prefixado"},
+                            {"label": "Fundos de Investimento", "value": "Fundos de Investimento"},
+                            {"label": "Ações", "value": "Ações"},
+                            {"label": "Criptomoedas", "value": "Criptomoedas"},
+                            {"label": "Outro", "value": "Outro"},
                         ],
-                        value="INST. FIN."
+                        value="Poupança"
                     ),
                 ], width=6, className="mb-3"),
+                
                 dbc.Col([
-                    dbc.Label("Valor Acumulado:"),
-                    dbc.Input(id="input-valor-montante", type="number", 
-                            placeholder="Ex: 11041.51"),
+                    dbc.Label("Tipo de Rendimento:"),
+                    dbc.Select(
+                        id="select-tipo-rendimento",
+                        options=[
+                            {"label": "Sem rendimento", "value": "Sem rendimento"},
+                            {"label": "% do CDI", "value": "% do CDI"},
+                            {"label": "Taxa fixa (% a.a.)", "value": "Taxa fixa (% a.a.)"},
+                            {"label": "IPCA + (% a.a.)", "value": "IPCA + (% a.a.)"},
+                            {"label": "100% da Selic", "value": "100% da Selic"},
+                            {"label": "Poupança (0.5% a.m.)", "value": "Poupança (0.5% a.m.)"},
+                        ],
+                        value="Sem rendimento"
+                    ),
                 ], width=6, className="mb-3"),
+                
+                dbc.Col([
+                    dbc.Label("Taxa/Percentual:"),
+                    dbc.Input(
+                        id="input-taxa-rendimento", 
+                        type="number", 
+                        placeholder="Ex: 100 (para 100% do CDI)",
+                        step="0.01"
+                    ),
+                    dbc.FormText("Para CDI: 100 = 100% do CDI. Para taxa fixa: valor em % a.a.")
+                ], width=6, className="mb-3"),
+                
+                dbc.Col([
+                    dbc.Label("Data de Início:"),
+                    dcc.DatePickerSingle(
+                        id='date-inicio-investimento',
+                        date=datetime.today().date(),
+                        display_format='DD/MM/YYYY',
+                        style={"width": "100%"}
+                    ),
+                ], width=6, className="mb-3"),
+                
+                dbc.Col([
+                    dbc.Label("Valor Inicial Investido:"),
+                    dbc.Input(
+                        id="input-valor-inicial-montante", 
+                        type="number", 
+                        placeholder="Ex: 200.00",
+                        step="0.01"
+                    ),
+                ], width=6, className="mb-3"),
+                
+                dbc.Col([
+                    dbc.Label("Valor Atual:"),
+                    dbc.Input(
+                        id="input-valor-montante", 
+                        type="number", 
+                        placeholder="Ex: 205.50",
+                        step="0.01"
+                    ),
+                    dbc.FormText("Será atualizado automaticamente com os rendimentos")
+                ], width=6, className="mb-3"),
+                
+                # Informações de rendimento
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("💰 Resumo do Investimento", className="mb-3"),
+                            html.Div([
+                                html.P([
+                                    html.Strong("Rendimento estimado diário: "),
+                                    html.Span("R$ 0,00", id="display-rendimento-diario",
+                                            style={"color": "#27ae60"})
+                                ], className="mb-1"),
+                                html.P([
+                                    html.Strong("Rendimento estimado mensal: "),
+                                    html.Span("R$ 0,00", id="display-rendimento-mensal",
+                                            style={"color": "#27ae60"})
+                                ], className="mb-1"),
+                                html.P([
+                                    html.Strong("Rendimento estimado anual: "),
+                                    html.Span("R$ 0,00", id="display-rendimento-anual",
+                                            style={"color": "#27ae60"})
+                                ], className="mb-0"),
+                            ])
+                        ])
+                    ], color="light", className="mb-2")
+                ], width=12),
             ])
         ]),
         dbc.ModalFooter([
@@ -238,6 +327,10 @@ def load_user_planos(user, refresh):
         return [], [], ""
     
     user_id = user['id']
+    
+    # Atualizar valores dos investimentos com base nos rendimentos
+    atualizar_valores_investimentos(user_id)
+    
     planos = get_planos_by_user(user_id)
     montantes = get_montantes_by_user(user_id)
     anotacoes = get_anotacoes_planos(user_id)
@@ -566,25 +659,38 @@ def delete_plano_callback(n_clicks, user, refresh):
     return (refresh or 0) + 1
 
 
-# Salvar Montante
+# Salvar Montante/Investimento
 @app.callback(
     Output("store-refresh-planos", "data", allow_duplicate=True),
     Input("btn-salvar-montante", "n_clicks"),
     [State("input-inst-montante", "value"),
      State("select-tipo-montante", "value"),
      State("input-valor-montante", "value"),
+     State("select-tipo-rendimento", "value"),
+     State("input-taxa-rendimento", "value"),
+     State("date-inicio-investimento", "date"),
+     State("input-valor-inicial-montante", "value"),
      State("store-user", "data"),
      State("store-refresh-planos", "data")],
     prevent_initial_call=True
 )
-def save_montante(n, instituicao, tipo, valor, user, refresh):
-    if not n or not instituicao or not tipo or not valor:
+def save_montante(n, instituicao, tipo, valor, tipo_rendimento, taxa, data_inicio, valor_inicial, user, refresh):
+    if not n or not instituicao or not tipo:
         return dash.no_update
     
     if not user or 'id' not in user:
         return dash.no_update
     
-    insert_montante(instituicao, tipo, float(valor), user['id'])
+    # Valores padrão se não fornecidos
+    valor = float(valor) if valor else 0
+    valor_inicial = float(valor_inicial) if valor_inicial else valor
+    taxa = float(taxa) if taxa else 0
+    tipo_rendimento = tipo_rendimento if tipo_rendimento else "Sem rendimento"
+    
+    insert_montante(
+        instituicao, tipo, valor, tipo_rendimento, taxa, 
+        data_inicio, valor_inicial, user['id']
+    )
     
     return (refresh or 0) + 1
 
@@ -652,6 +758,50 @@ def load_anotacoes(anotacoes):
 def toggle_modal_plano(n1, n2, n3, n4, is_open):
     if n1 or n2 or n3 or n4:
         return not is_open
+    return is_open
+
+
+# Callback para calcular rendimentos em tempo real no modal
+@app.callback(
+    [Output("display-rendimento-diario", "children"),
+     Output("display-rendimento-mensal", "children"),
+     Output("display-rendimento-anual", "children")],
+    [Input("input-valor-inicial-montante", "value"),
+     Input("select-tipo-rendimento", "value"),
+     Input("input-taxa-rendimento", "value"),
+     Input("date-inicio-investimento", "date")],
+    prevent_initial_call=False
+)
+def calcular_rendimentos_display(valor_inicial, tipo_rendimento, taxa, data_inicio):
+    from datetime import datetime, date
+    
+    if not valor_inicial or not tipo_rendimento or tipo_rendimento == "Sem rendimento":
+        return "R$ 0,00", "R$ 0,00", "R$ 0,00"
+    
+    valor_inicial = float(valor_inicial) if valor_inicial else 0
+    taxa = float(taxa) if taxa else 0
+    
+    # Calcula dias decorridos desde o início
+    if data_inicio:
+        try:
+            data_inicio_obj = datetime.strptime(data_inicio.split('T')[0], '%Y-%m-%d').date()
+            dias = (date.today() - data_inicio_obj).days
+            if dias < 0:
+                dias = 0
+        except:
+            dias = 0
+    else:
+        dias = 0
+    
+    resultado = calcular_rendimento_investimento(
+        valor_inicial, tipo_rendimento, taxa, dias
+    )
+    
+    return (
+        f"R$ {resultado['rendimento_diario']:.2f}",
+        f"R$ {resultado['rendimento_mensal']:.2f}",
+        f"R$ {resultado['rendimento_anual']:.2f}"
+    )
     return is_open
 
 

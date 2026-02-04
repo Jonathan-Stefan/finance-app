@@ -27,7 +27,7 @@ from globals import cat_despesa, cat_receita
 # ========= Layout ========= #
 layout = dbc.Col([
                 html.H1("FINANCE APP", className="text-primary"),
-                html.P("By Jônathan", className="text-info"),
+                html.P(id="user-info", className="text-info"),
                 html.Hr(),
 
 
@@ -709,3 +709,14 @@ def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, n
 
     # se nada mudou, não altera o contador
     return refresh_despesas
+
+
+# =========  Callback para exibir nome do usuário  =========== #
+@app.callback(
+    Output("user-info", "children"),
+    Input('store-user', 'data')
+)
+def display_user_info(user):
+    if user and 'username' in user:
+        return f"Bem-vindo, {user['username']}"
+    return "By Visitante"

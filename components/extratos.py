@@ -26,6 +26,21 @@ layout = dbc.Col([
     dcc.Store(id='temp-receitas-data', data=None),
     dcc.Store(id='temp-despesas-data', data=None),
     
+    # Filtro de período
+    dbc.Row([
+        dbc.Col([
+            html.Label("Filtrar por período:"),
+            dcc.DatePickerRange(
+                id='date-picker-extratos',
+                month_format='Do MMM, YY',
+                end_date_placeholder_text='Data...',
+                with_portal=True,
+                updatemode='singledate',
+                display_format='DD/MM/YYYY'
+            ),
+        ], width=12)
+    ], className="mb-3"),
+    
     dbc.Row([
         dbc.Col([html.Legend("Tabela de receitas")], width=8),
         dbc.Col([
@@ -203,14 +218,22 @@ def _normalize_row(row):
 # Tabela receitas - atualizar dados
 @app.callback(
     Output('datatable-receitas', 'data'),
-    Input('store-receitas', 'data')
+    [Input('store-receitas', 'data'),
+     Input('date-picker-extratos', 'start_date'),
+     Input('date-picker-extratos', 'end_date')]
 )
-def atualizar_dados_receitas(data):
+def atualizar_dados_receitas(data, start_date, end_date):
     df = pd.DataFrame(data)
     if df.empty:
         df = pd.DataFrame(columns=["id", "Valor", "Efetuado", "Fixo", "Data", "Categoria", "Descrição", "user_id"])
     
     df['Data'] = pd.to_datetime(df['Data']).dt.date
+    
+    # Aplicar filtro de período
+    if start_date and end_date:
+        start = pd.to_datetime(start_date).date()
+        end = pd.to_datetime(end_date).date()
+        df = df[(df['Data'] >= start) & (df['Data'] <= end)]
 
     df['Efetuado'] = df['Efetuado'].astype(object)
     df.loc[df['Efetuado'] == 0, 'Efetuado'] = EFETUADO_NAO
@@ -222,21 +245,29 @@ def atualizar_dados_receitas(data):
 
     df = df.fillna('-')
     df = df.drop(columns=[c for c in ["user_id"] if c in df.columns])
-    df = df.sort_values(by='Data', ascending=False)
+    df = df.sort_values(by='Data', ascending=True)
     
     return df.to_dict('records')
 
 # Tabela despesas - atualizar dados
 @app.callback(
     Output('datatable-despesas', 'data'),
-    Input('store-despesas', 'data')
+    [Input('store-despesas', 'data'),
+     Input('date-picker-extratos', 'start_date'),
+     Input('date-picker-extratos', 'end_date')]
 )
-def atualizar_dados_despesas(data):
+def atualizar_dados_despesas(data, start_date, end_date):
     df = pd.DataFrame(data)
     if df.empty:
         df = pd.DataFrame(columns=["id", "Valor", "Status", "Fixo", "Data", "Categoria", "Descrição", "user_id"])
     
     df['Data'] = pd.to_datetime(df['Data']).dt.date
+    
+    # Aplicar filtro de período
+    if start_date and end_date:
+        start = pd.to_datetime(start_date).date()
+        end = pd.to_datetime(end_date).date()
+        df = df[(df['Data'] >= start) & (df['Data'] <= end)]
 
     # Se tiver Status, usa ele; senão mantém Efetuado (migração)
     if 'Status' not in df.columns:
@@ -252,7 +283,7 @@ def atualizar_dados_despesas(data):
     df = df.fillna('-')
     # Remove colunas desnecessárias
     df = df.drop(columns=[c for c in ["user_id", "Efetuado"] if c in df.columns])
-    df = df.sort_values(by='Data', ascending=False)
+    df = df.sort_values(by='Data', ascending=True)
 
     return df.to_dict('records')
 

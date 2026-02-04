@@ -640,16 +640,29 @@ def init_planos_tables():
         FOREIGN KEY (user_id) REFERENCES users (id)
     )""")
     
-    # Tabela de montantes acumulados
+    # Tabela de montantes acumulados (investimentos)
     cur.execute("""CREATE TABLE IF NOT EXISTS montantes (
         id SERIAL PRIMARY KEY,
         instituicao TEXT,
         tipo TEXT,
         valor REAL,
+        tipo_rendimento TEXT DEFAULT 'Sem rendimento',
+        taxa_percentual REAL DEFAULT 0,
+        data_inicio TEXT,
+        valor_inicial REAL,
         user_id INTEGER,
         created_at TEXT,
         FOREIGN KEY (user_id) REFERENCES users (id)
     )""")
+    
+    # Adicionar colunas novas se não existirem (migração)
+    try:
+        cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS tipo_rendimento TEXT DEFAULT 'Sem rendimento'")
+        cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS taxa_percentual REAL DEFAULT 0")
+        cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS data_inicio TEXT")
+        cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS valor_inicial REAL")
+    except:
+        pass
     
     # Tabela de anotações
     cur.execute("""CREATE TABLE IF NOT EXISTS anotacoes_planos (
@@ -726,25 +739,29 @@ def calculate_plano_valor_acumulado(plano_id, user_id):
 
 
 def get_montantes_by_user(user_id):
-    """Retorna todos os montantes de um usuário"""
+    """Retorna todos os montantes/investimentos de um usuário"""
     engine = get_engine()
     df = pd.read_sql_query(
-        "SELECT id, instituicao, tipo, valor FROM montantes WHERE user_id = %(user_id)s",
+        """SELECT id, instituicao, tipo, valor, tipo_rendimento, taxa_percentual, 
+                  data_inicio, valor_inicial 
+           FROM montantes WHERE user_id = %(user_id)s""",
         engine, params={"user_id": user_id}
     )
     # Mantém nomes de colunas como vêm do banco (minúsculas)
     return df.to_dict('records')
 
 
-def insert_montante(instituicao, tipo, valor, user_id):
-    """Insere um novo montante"""
+def insert_montante(instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, user_id):
+    """Insere um novo investimento/montante"""
     from datetime import datetime
     conn = connect_db()
     cur = conn.cursor()
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cur.execute(
-        "INSERT INTO montantes (instituicao, tipo, valor, user_id, created_at) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-        (instituicao, tipo, valor, user_id, created_at)
+        """INSERT INTO montantes (instituicao, tipo, valor, tipo_rendimento, taxa_percentual, 
+                                   data_inicio, valor_inicial, user_id, created_at) 
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, user_id, created_at)
     )
     montante_id = cur.fetchone()[0]
     conn.commit()
@@ -752,13 +769,15 @@ def insert_montante(instituicao, tipo, valor, user_id):
     return montante_id
 
 
-def update_montante(montante_id, instituicao, tipo, valor):
-    """Atualiza um montante existente"""
+def update_montante(montante_id, instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial):
+    """Atualiza um investimento/montante existente"""
     conn = connect_db()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE montantes SET instituicao = %s, tipo = %s, valor = %s WHERE id = %s",
-        (instituicao, tipo, valor, montante_id)
+        """UPDATE montantes SET instituicao = %s, tipo = %s, valor = %s, tipo_rendimento = %s, 
+                                taxa_percentual = %s, data_inicio = %s, valor_inicial = %s 
+           WHERE id = %s""",
+        (instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, montante_id)
     )
     conn.commit()
     conn.close()
@@ -800,6 +819,124 @@ def save_anotacoes_planos(user_id, conteudo):
     else:
         cur.execute("INSERT INTO anotacoes_planos (conteudo, user_id, updated_at) VALUES (%s,%s,%s)",
                    (conteudo, user_id, updated_at))
+    
+    conn.commit()
+    conn.close()
+
+
+# ========= Funções de Cálculo de Rendimento ========= #
+
+def calcular_rendimento_investimento(valor_inicial, tipo_rendimento, taxa_percentual, dias_decorridos):
+    """
+    Calcula o rendimento de um investimento
+    
+    Args:
+        valor_inicial: Valor inicial investido
+        tipo_rendimento: Tipo de rendimento (% do CDI, Taxa fixa, etc.)
+        taxa_percentual: Taxa/percentual do rendimento
+        dias_decorridos: Número de dias desde o início do investimento
+    
+    Returns:
+        dict com valor_atual, rendimento_total, rendimento_diario, rendimento_mensal, rendimento_anual
+    """
+    from constants import TAXA_CDI_ANUAL, TAXA_SELIC_ANUAL, TAXA_IPCA_ANUAL
+    
+    if not valor_inicial or valor_inicial <= 0:
+        return {
+            'valor_atual': 0,
+            'rendimento_total': 0,
+            'rendimento_diario': 0,
+            'rendimento_mensal': 0,
+            'rendimento_anual': 0
+        }
+    
+    taxa_anual = 0
+    
+    # Determina a taxa anual baseada no tipo de rendimento
+    if tipo_rendimento == "Sem rendimento":
+        taxa_anual = 0
+    
+    elif tipo_rendimento == "% do CDI":
+        # Ex: 100% do CDI com CDI a 10.65% a.a.
+        taxa_anual = (taxa_percentual / 100) * TAXA_CDI_ANUAL
+    
+    elif tipo_rendimento == "Taxa fixa (% a.a.)":
+        taxa_anual = taxa_percentual
+    
+    elif tipo_rendimento == "IPCA + (% a.a.)":
+        taxa_anual = TAXA_IPCA_ANUAL + taxa_percentual
+    
+    elif tipo_rendimento == "100% da Selic":
+        taxa_anual = TAXA_SELIC_ANUAL
+    
+    elif tipo_rendimento == "Poupança (0.5% a.m.)":
+        taxa_anual = 0.5 * 12  # 6% a.a.
+    
+    # Conversão para taxa diária (juros compostos)
+    taxa_diaria = (1 + taxa_anual/100) ** (1/252) - 1  # 252 dias úteis no ano
+    
+    # Cálculo do montante com juros compostos
+    valor_atual = valor_inicial * ((1 + taxa_diaria) ** dias_decorridos)
+    rendimento_total = valor_atual - valor_inicial
+    
+    # Estimativas de rendimento
+    rendimento_diario = valor_atual * taxa_diaria
+    rendimento_mensal = valor_atual * ((1 + taxa_diaria) ** 21 - 1)  # 21 dias úteis no mês
+    rendimento_anual = valor_atual * ((1 + taxa_diaria) ** 252 - 1)  # 252 dias úteis no ano
+    
+    return {
+        'valor_atual': round(valor_atual, 2),
+        'rendimento_total': round(rendimento_total, 2),
+        'rendimento_diario': round(rendimento_diario, 2),
+        'rendimento_mensal': round(rendimento_mensal, 2),
+        'rendimento_anual': round(rendimento_anual, 2)
+    }
+
+
+def atualizar_valores_investimentos(user_id):
+    """Atualiza os valores de todos os investimentos de um usuário com base nos rendimentos"""
+    from datetime import datetime, date
+    
+    conn = connect_db()
+    cur = conn.cursor()
+    
+    # Busca todos os investimentos do usuário
+    cur.execute(
+        """SELECT id, valor_inicial, tipo_rendimento, taxa_percentual, data_inicio 
+           FROM montantes WHERE user_id = %s AND data_inicio IS NOT NULL""",
+        (user_id,)
+    )
+    
+    investimentos = cur.fetchall()
+    
+    hoje = date.today()
+    
+    for inv in investimentos:
+        inv_id, valor_inicial, tipo_rendimento, taxa_percentual, data_inicio_str = inv
+        
+        if not valor_inicial or not data_inicio_str:
+            continue
+        
+        # Calcula dias decorridos
+        data_inicio = datetime.strptime(data_inicio_str, '%Y-%m-%d').date()
+        dias_decorridos = (hoje - data_inicio).days
+        
+        if dias_decorridos < 0:
+            dias_decorridos = 0
+        
+        # Calcula novo valor
+        resultado = calcular_rendimento_investimento(
+            valor_inicial, 
+            tipo_rendimento or "Sem rendimento", 
+            taxa_percentual or 0, 
+            dias_decorridos
+        )
+        
+        # Atualiza valor no banco
+        cur.execute(
+            "UPDATE montantes SET valor = %s WHERE id = %s",
+            (resultado['valor_atual'], inv_id)
+        )
     
     conn.commit()
     conn.close()

@@ -74,7 +74,7 @@ layout = dbc.Col([
                     dbc.Row([
                         dbc.Col([
                             dbc.Label("Categoria de Despesa"),
-                            dcc.Dropdown(
+                            dbc.Select(
                                 id="select-categoria-orcamento",
                                 placeholder="Selecione uma categoria..."
                             )

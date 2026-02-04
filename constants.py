@@ -95,3 +95,33 @@ NO_WORDS = ("não", "nao", "n", "false", "no", "0", 0, False)
 
 # Valores considerados vazios
 EMPTY_VALUES = (None, "", "-")
+
+
+# ========= Investimentos ========= #
+class TipoInvestimento(str, Enum):
+    """Tipos de investimentos disponíveis"""
+    POUPANCA = "Poupança"
+    CDB = "CDB"
+    LCI = "LCI"
+    LCA = "LCA"
+    TESOURO_SELIC = "Tesouro Selic"
+    TESOURO_IPCA = "Tesouro IPCA+"
+    TESOURO_PREFIXADO = "Tesouro Prefixado"
+    FUNDOS = "Fundos de Investimento"
+    ACOES = "Ações"
+    CRIPTOMOEDAS = "Criptomoedas"
+    OUTRO = "Outro"
+
+class TipoRendimento(str, Enum):
+    """Tipos de rendimento disponíveis"""
+    SEM_RENDIMENTO = "Sem rendimento"
+    CDI = "% do CDI"
+    TAXA_FIXA = "Taxa fixa (% a.a.)"
+    IPCA_PLUS = "IPCA + (% a.a.)"
+    SELIC = "100% da Selic"
+    POUPANCA_RENDIMENTO = "Poupança (0.5% a.m.)"
+
+# Taxa CDI atual (atualizar periodicamente)
+TAXA_CDI_ANUAL = 10.65  # % ao ano (exemplo: 10.65% a.a.)
+TAXA_SELIC_ANUAL = 10.75  # % ao ano
+TAXA_IPCA_ANUAL = 4.50  # % ao ano
