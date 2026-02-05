@@ -25,6 +25,9 @@ layout = dbc.Col([
     # Stores temporários para dados editados
     dcc.Store(id='temp-receitas-data', data=None),
     dcc.Store(id='temp-despesas-data', data=None),
+    # Stores para guardar estado original da tabela (antes de edições)
+    dcc.Store(id='original-receitas-data', data=None),
+    dcc.Store(id='original-despesas-data', data=None),
     
     # Filtro de período
     dbc.Row([
@@ -287,6 +290,19 @@ def atualizar_dados_despesas(data, start_date, end_date):
 
     return df.to_dict('records')
 
+# Capturar estado original da tabela de receitas ao carregar
+@app.callback(
+    Output('original-receitas-data', 'data'),
+    Input('datatable-receitas', 'data'),
+    State('original-receitas-data', 'data'),
+    prevent_initial_call=True
+)
+def capture_original_receitas(data, original_data):
+    # Só guarda o estado original na primeira vez (quando ainda é None)
+    if original_data is None:
+        return data
+    return dash.no_update
+
 # Capturar dados editados da tabela de receitas
 @app.callback(
     Output('temp-receitas-data', 'data'),
@@ -300,23 +316,23 @@ def capture_receitas_edits(data):
 @app.callback(
     Output('store-refresh-receitas', 'data', allow_duplicate=True),
     Output('msg-receitas', 'children'),
+    Output('original-receitas-data', 'data', allow_duplicate=True),
     Input('btn-salvar-receitas', 'n_clicks'),
     State('temp-receitas-data', 'data'),
+    State('original-receitas-data', 'data'),
     State('store-user', 'data'),
     State('store-refresh-receitas', 'data'),
     prevent_initial_call=True
 )
-def sync_receitas(n_clicks, data, user, refresh):
+def sync_receitas(n_clicks, data, original_data, user, refresh):
     if not n_clicks:
-        return dash.no_update, ""
+        return dash.no_update, "", dash.no_update
     if not user or 'id' not in user:
-        return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000)
+        return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000), dash.no_update
     if data is None:
-        return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000)
+        return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000), dash.no_update
     
-    prev_records = table_to_df('receitas', user_id=user['id'], include_id=True).to_dict('records')
-    
-    # Mapear registros atuais e anteriores por ID
+    # Mapear registros atuais da tabela
     curr = {}
     for r in data:
         try:
@@ -325,51 +341,64 @@ def sync_receitas(n_clicks, data, user, refresh):
         except (ValueError, TypeError):
             continue
     
-    prev = {}
-    for r in prev_records:
-        try:
-            if r.get('id') is not None and str(r.get('id')).strip():
-                prev[int(r['id'])] = r
-        except (ValueError, TypeError):
-            continue
+    # Mapear registros originais da tabela (antes das edições)
+    orig = {}
+    if original_data:
+        for r in original_data:
+            try:
+                if r.get('id') is not None and str(r.get('id')).strip():
+                    orig[int(r['id'])] = r
+            except (ValueError, TypeError):
+                continue
     
     curr_ids = set(curr.keys())
-    prev_ids = set(prev.keys())
+    orig_ids = set(orig.keys())
     
-    # IDs removidos
-    removed_ids = prev_ids - curr_ids
-    # IDs que ainda existem (podem ter sido editados)
-    existing_ids = prev_ids & curr_ids
+    # IDs removidos manualmente da tabela
+    removed_ids = orig_ids - curr_ids
+    # IDs que existem em ambos (podem ter sido editados)
+    existing_ids = orig_ids & curr_ids
     
-    changed = False
     deletados = 0
     atualizados = 0
     
-    # Deletar linhas removidas
+    # Deletar linhas removidas manualmente pelo usuário
     for rid in removed_ids:
         delete_transacao('receitas', rid, user['id'])
         deletados += 1
-        changed = True
     
     # Atualizar linhas modificadas
     for rid in existing_ids:
         new_row = _normalize_row(curr[rid])
-        old_row = _normalize_row(prev[rid])
+        old_row = _normalize_row(orig[rid])
         if new_row != old_row:
             update_transacao('receitas', rid, new_row, user['id'])
             atualizados += 1
-            changed = True
     
-    if changed:
+    if atualizados > 0 or deletados > 0:
         msg_parts = []
         if atualizados > 0:
             msg_parts.append(f"{atualizados} receita(s) atualizada(s)")
         if deletados > 0:
             msg_parts.append(f"{deletados} receita(s) deletada(s)")
         mensagem = ", ".join(msg_parts)
-        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000)
+        # Resetar estado original após salvar
+        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000), None
     else:
-        return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000)
+        return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000), dash.no_update
+
+# Capturar estado original da tabela de despesas ao carregar
+@app.callback(
+    Output('original-despesas-data', 'data'),
+    Input('datatable-despesas', 'data'),
+    State('original-despesas-data', 'data'),
+    prevent_initial_call=True
+)
+def capture_original_despesas(data, original_data):
+    # Só guarda o estado original na primeira vez (quando ainda é None)
+    if original_data is None:
+        return data
+    return dash.no_update
 
 # Capturar dados editados da tabela de despesas
 @app.callback(
@@ -384,23 +413,23 @@ def capture_despesas_edits(data):
 @app.callback(
     Output('store-refresh-despesas', 'data', allow_duplicate=True),
     Output('msg-despesas', 'children'),
+    Output('original-despesas-data', 'data', allow_duplicate=True),
     Input('btn-salvar-despesas', 'n_clicks'),
     State('temp-despesas-data', 'data'),
+    State('original-despesas-data', 'data'),
     State('store-user', 'data'),
     State('store-refresh-despesas', 'data'),
     prevent_initial_call=True
 )
-def sync_despesas(n_clicks, data, user, refresh):
+def sync_despesas(n_clicks, data, original_data, user, refresh):
     if not n_clicks:
-        return dash.no_update, ""
+        return dash.no_update, "", dash.no_update
     if not user or 'id' not in user:
-        return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000)
+        return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000), dash.no_update
     if data is None:
-        return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000)
+        return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000), dash.no_update
     
-    prev_records = table_to_df('despesas', user_id=user['id'], include_id=True).to_dict('records')
-    
-    # Mapear registros atuais e anteriores por ID
+    # Mapear registros atuais da tabela
     curr = {}
     for r in data:
         try:
@@ -409,60 +438,72 @@ def sync_despesas(n_clicks, data, user, refresh):
         except (ValueError, TypeError):
             continue
     
-    prev = {}
-    for r in prev_records:
-        try:
-            if r.get('id') is not None and str(r.get('id')).strip():
-                prev[int(r['id'])] = r
-        except (ValueError, TypeError):
-            continue
+    # Mapear registros originais da tabela (antes das edições)
+    orig = {}
+    if original_data:
+        for r in original_data:
+            try:
+                if r.get('id') is not None and str(r.get('id')).strip():
+                    orig[int(r['id'])] = r
+            except (ValueError, TypeError):
+                continue
     
     curr_ids = set(curr.keys())
-    prev_ids = set(prev.keys())
+    orig_ids = set(orig.keys())
     
-    # IDs removidos
-    removed_ids = prev_ids - curr_ids
-    # IDs que ainda existem (podem ter sido editados)
-    existing_ids = prev_ids & curr_ids
+    # IDs removidos manualmente da tabela
+    removed_ids = orig_ids - curr_ids
+    # IDs que existem em ambos (podem ter sido editados)
+    existing_ids = orig_ids & curr_ids
     
-    changed = False
     deletados = 0
     atualizados = 0
     
-    # Deletar linhas removidas
+    # Deletar linhas removidas manualmente pelo usuário
     for rid in removed_ids:
         delete_transacao('despesas', rid, user['id'])
         deletados += 1
-        changed = True
     
     # Atualizar linhas modificadas
     for rid in existing_ids:
         new_row = _normalize_row(curr[rid])
-        old_row = _normalize_row(prev[rid])
+        old_row = _normalize_row(orig[rid])
         if new_row != old_row:
             update_transacao('despesas', rid, new_row, user['id'])
             atualizados += 1
-            changed = True
     
-    if changed:
+    if atualizados > 0 or deletados > 0:
         msg_parts = []
         if atualizados > 0:
             msg_parts.append(f"{atualizados} despesa(s) atualizada(s)")
         if deletados > 0:
             msg_parts.append(f"{deletados} despesa(s) deletada(s)")
         mensagem = ", ".join(msg_parts)
-        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000)
+        # Resetar estado original após salvar
+        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000), None
     else:
-        return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000)
+        return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000), dash.no_update
 
 # Bar Graph            
 @app.callback(
     Output('bar-graph', 'figure'),
     [Input('store-despesas', 'data'),
+    Input('date-picker-extratos', 'start_date'),
+    Input('date-picker-extratos', 'end_date'),
     Input(ThemeChangerAIO.ids.radio("theme"), "value")]
 )
-def bar_chart(data, theme):
+def bar_chart(data, start_date, end_date, theme):
     df = pd.DataFrame(data)
+    
+    if not df.empty:
+        df['Data'] = pd.to_datetime(df['Data'])
+        
+        # Aplicar filtro de período apenas se ambos start_date e end_date estiverem preenchidos
+        if start_date and end_date:
+            start = pd.to_datetime(start_date).date()
+            end = pd.to_datetime(end_date).date()
+            df['Data'] = df['Data'].dt.date
+            df = df[(df['Data'] >= start) & (df['Data'] <= end)]
     
     if df.empty:
         graph = go.Figure()
@@ -482,7 +523,7 @@ def bar_chart(data, theme):
         )
         return graph
     
-    df_grouped = df.groupby("Categoria").sum()[["Valor"]].reset_index()
+    df_grouped = df.groupby("Categoria")["Valor"].sum().reset_index()
     graph = px.bar(df_grouped, x='Categoria', y='Valor', title="Despesas Gerais")
     graph.update_layout(margin=GRAPH_MARGIN,template=template_from_url(theme))
     graph.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
@@ -491,10 +532,23 @@ def bar_chart(data, theme):
 # Simple card
 @app.callback(
     Output('valor_despesa_card', 'children'),
-    Input('store-despesas', 'data')
+    [Input('store-despesas', 'data'),
+    Input('date-picker-extratos', 'start_date'),
+    Input('date-picker-extratos', 'end_date')]
 )
-def display_desp(data):
+def display_desp(data, start_date, end_date):
     df = pd.DataFrame(data)
+    
+    if not df.empty:
+        df['Data'] = pd.to_datetime(df['Data'])
+        
+        # Aplicar filtro de período apenas se ambos start_date e end_date estiverem preenchidos
+        if start_date and end_date:
+            start = pd.to_datetime(start_date).date()
+            end = pd.to_datetime(end_date).date()
+            df['Data'] = df['Data'].dt.date
+            df = df[(df['Data'] >= start) & (df['Data'] <= end)]
+    
     valor = df['Valor'].sum() if not df.empty else 0
     
-    return f"R$ {valor}"
+    return f"R$ {valor:.2f}"
