@@ -173,7 +173,7 @@ def populate_dropdownvalues_receitas(data, start_date, end_date):
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
 
-    return [([{"label": x, "value": x} for x in df.Categoria.unique()]), val, f"R$ {valor}"]
+    return [([{"label": x, "value": x} for x in df.Categoria.unique()]), val, f"R$ {valor:.2f}"]
 
 # Dropdown Despesa
 @app.callback([Output("dropdown-despesa", "options"),
@@ -200,7 +200,7 @@ def populate_dropdownvalues_despesas(data, start_date, end_date):
     valor = df['Valor'].sum()
     val = df.Categoria.unique().tolist()
 
-    return [([{"label": x, "value": x} for x in df.Categoria.unique()]), val, f"R$ {valor}"]
+    return [([{"label": x, "value": x} for x in df.Categoria.unique()]), val, f"R$ {valor:.2f}"]
 
 # VALOR - saldo
 @app.callback(
@@ -239,7 +239,7 @@ def saldo_total(despesas, receitas, start_date, end_date):
     valor_receitas = df_receitas['Valor'].sum() if not df_receitas.empty and 'Valor' in df_receitas.columns else 0
     valor = valor_receitas - valor_despesas
 
-    return f"R$ {valor}"
+    return f"R$ {valor:.2f}"
     
 # Gráfico 1
 @app.callback(
