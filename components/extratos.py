@@ -22,12 +22,9 @@ from utils.validators import (
 
 # =========  Layout  =========== #
 layout = dbc.Col([
-    # Stores temporários para dados editados
-    dcc.Store(id='temp-receitas-data', data=None),
-    dcc.Store(id='temp-despesas-data', data=None),
-    # Stores para guardar estado original da tabela (antes de edições)
-    dcc.Store(id='original-receitas-data', data=None),
-    dcc.Store(id='original-despesas-data', data=None),
+    # Store para rastrear deleções manuais
+    dcc.Store(id='deleted-receitas-ids', data=[]),
+    dcc.Store(id='deleted-despesas-ids', data=[]),
     
     # Filtro de período
     dbc.Row([
@@ -45,10 +42,11 @@ layout = dbc.Col([
     ], className="mb-3"),
     
     dbc.Row([
-        dbc.Col([html.Legend("Tabela de receitas")], width=8),
+        dbc.Col([html.Legend("Tabela de receitas")], width=6),
         dbc.Col([
+            dbc.Button("Deletar Selecionados", id="btn-deletar-receitas", color="danger", size="sm", className="float-end me-2"),
             dbc.Button("Salvar Alterações", id="btn-salvar-receitas", color="success", size="sm", className="float-end")
-        ], width=4),
+        ], width=6),
     ], className="mb-2"),
     dbc.Row([
         dash_table.DataTable(
@@ -96,10 +94,11 @@ layout = dbc.Col([
     html.Div(id="msg-receitas", className="mt-2"),
 
     dbc.Row([
-        dbc.Col([html.Legend("Tabela de despesas")], width=8),
+        dbc.Col([html.Legend("Tabela de despesas")], width=6),
         dbc.Col([
+            dbc.Button("Deletar Selecionados", id="btn-deletar-despesas", color="danger", size="sm", className="float-end me-2"),
             dbc.Button("Salvar Alterações", id="btn-salvar-despesas", color="success", size="sm", className="float-end")
-        ], width=4),
+        ], width=6),
     ], className="mb-2 mt-4"),
     dbc.Row([
         dash_table.DataTable(
@@ -290,90 +289,126 @@ def atualizar_dados_despesas(data, start_date, end_date):
 
     return df.to_dict('records')
 
-# Capturar estado original da tabela de receitas ao carregar
+# Rastrear remoções de linhas na tabela de receitas
 @app.callback(
-    Output('original-receitas-data', 'data'),
+    Output('deleted-receitas-ids', 'data'),
     Input('datatable-receitas', 'data'),
-    State('original-receitas-data', 'data'),
+    State('datatable-receitas', 'data_previous'),
+    State('deleted-receitas-ids', 'data'),
     prevent_initial_call=True
 )
-def capture_original_receitas(data, original_data):
-    # Só guarda o estado original na primeira vez (quando ainda é None)
-    if original_data is None:
-        return data
-    return dash.no_update
+def track_receitas_deletions(current_data, previous_data, deleted_ids):
+    if previous_data is None or current_data is None:
+        return deleted_ids or []
+    
+    # Extrair IDs atuais e anteriores
+    current_ids = set()
+    for r in current_data:
+        if r.get('id') is not None and str(r.get('id')).strip():
+            try:
+                current_ids.add(int(r['id']))
+            except (ValueError, TypeError):
+                pass
+    
+    previous_ids = set()
+    for r in previous_data:
+        if r.get('id') is not None and str(r.get('id')).strip():
+            try:
+                previous_ids.add(int(r['id']))
+            except (ValueError, TypeError):
+                pass
+    
+    # Detectar remoções (cliques no X)
+    removed = previous_ids - current_ids
+    if removed:
+        deleted_list = deleted_ids or []
+        for rid in removed:
+            if rid not in deleted_list:
+                deleted_list.append(rid)
+        return deleted_list
+    
+    return deleted_ids or []
 
-# Capturar dados editados da tabela de receitas
+# Processar deleções de receitas
 @app.callback(
-    Output('temp-receitas-data', 'data'),
-    Input('datatable-receitas', 'data'),
+    Output('store-refresh-receitas', 'data', allow_duplicate=True),
+    Output('msg-receitas', 'children', allow_duplicate=True),
+    Output('deleted-receitas-ids', 'data', allow_duplicate=True),
+    Input('btn-deletar-receitas', 'n_clicks'),
+    State('deleted-receitas-ids', 'data'),
+    State('store-user', 'data'),
+    State('store-refresh-receitas', 'data'),
     prevent_initial_call=True
 )
-def capture_receitas_edits(data):
-    return data
+def deletar_receitas(n_clicks, deleted_ids, user, refresh):
+    if not n_clicks:
+        return dash.no_update, dash.no_update, dash.no_update
+    if not user or 'id' not in user:
+        return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000), dash.no_update
+    if not deleted_ids:
+        return dash.no_update, dbc.Alert("Nenhuma linha selecionada para deletar", color="warning", duration=3000), dash.no_update
+    
+    deletados = 0
+    for rid in deleted_ids:
+        try:
+            delete_transacao('receitas', rid, user['id'])
+            deletados += 1
+        except Exception as e:
+            print(f"Erro ao deletar receita {rid}: {e}")
+    
+    if deletados > 0:
+        return (refresh or 0) + 1, dbc.Alert(f"✓ {deletados} receita(s) deletada(s)", color="success", duration=4000), []
+    else:
+        return dash.no_update, dbc.Alert("Erro ao deletar receitas", color="danger", duration=3000), dash.no_update
 
 # Sync receitas (update/delete)
 @app.callback(
     Output('store-refresh-receitas', 'data', allow_duplicate=True),
     Output('msg-receitas', 'children'),
-    Output('original-receitas-data', 'data', allow_duplicate=True),
+    Output('deleted-receitas-ids', 'data', allow_duplicate=True),
     Input('btn-salvar-receitas', 'n_clicks'),
-    State('temp-receitas-data', 'data'),
-    State('original-receitas-data', 'data'),
+    State('datatable-receitas', 'data'),
+    State('deleted-receitas-ids', 'data'),
+    State('store-receitas', 'data'),
     State('store-user', 'data'),
     State('store-refresh-receitas', 'data'),
     prevent_initial_call=True
 )
-def sync_receitas(n_clicks, data, original_data, user, refresh):
+def sync_receitas(n_clicks, current_data, deleted_ids, all_data, user, refresh):
     if not n_clicks:
         return dash.no_update, "", dash.no_update
     if not user or 'id' not in user:
         return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000), dash.no_update
-    if data is None:
+    if not current_data:
         return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000), dash.no_update
     
-    # Mapear registros atuais da tabela
-    curr = {}
-    for r in data:
-        try:
-            if r.get('id') is not None and str(r.get('id')).strip():
-                curr[int(r['id'])] = r
-        except (ValueError, TypeError):
-            continue
-    
-    # Mapear registros originais da tabela (antes das edições)
-    orig = {}
-    if original_data:
-        for r in original_data:
+    # Mapear TODOS os registros do store (fonte de verdade)
+    all_records = {}
+    if all_data:
+        for r in all_data:
             try:
                 if r.get('id') is not None and str(r.get('id')).strip():
-                    orig[int(r['id'])] = r
+                    all_records[int(r['id'])] = r
             except (ValueError, TypeError):
                 continue
-    
-    curr_ids = set(curr.keys())
-    orig_ids = set(orig.keys())
-    
-    # IDs removidos manualmente da tabela
-    removed_ids = orig_ids - curr_ids
-    # IDs que existem em ambos (podem ter sido editados)
-    existing_ids = orig_ids & curr_ids
     
     deletados = 0
     atualizados = 0
     
-    # Deletar linhas removidas manualmente pelo usuário
-    for rid in removed_ids:
-        delete_transacao('receitas', rid, user['id'])
-        deletados += 1
-    
-    # Atualizar linhas modificadas
-    for rid in existing_ids:
-        new_row = _normalize_row(curr[rid])
-        old_row = _normalize_row(orig[rid])
-        if new_row != old_row:
-            update_transacao('receitas', rid, new_row, user['id'])
-            atualizados += 1
+    # Processar atualizações comparando tabela atual com store
+    if current_data:
+        for row in current_data:
+            try:
+                if row.get('id') is not None and str(row.get('id')).strip():
+                    rid = int(row['id'])
+                    if rid in all_records:
+                        new_row = _normalize_row(row)
+                        old_row = _normalize_row(all_records[rid])
+                        if new_row != old_row:
+                            update_transacao('receitas', rid, new_row, user['id'])
+                            atualizados += 1
+            except (ValueError, TypeError):
+                continue
     
     if atualizados > 0 or deletados > 0:
         msg_parts = []
@@ -382,95 +417,130 @@ def sync_receitas(n_clicks, data, original_data, user, refresh):
         if deletados > 0:
             msg_parts.append(f"{deletados} receita(s) deletada(s)")
         mensagem = ", ".join(msg_parts)
-        # Resetar estado original após salvar
-        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000), None
+        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000), []
     else:
         return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000), dash.no_update
 
-# Capturar estado original da tabela de despesas ao carregar
+# Rastrear remoções de linhas na tabela de despesas
 @app.callback(
-    Output('original-despesas-data', 'data'),
+    Output('deleted-despesas-ids', 'data'),
     Input('datatable-despesas', 'data'),
-    State('original-despesas-data', 'data'),
+    State('datatable-despesas', 'data_previous'),
+    State('deleted-despesas-ids', 'data'),
     prevent_initial_call=True
 )
-def capture_original_despesas(data, original_data):
-    # Só guarda o estado original na primeira vez (quando ainda é None)
-    if original_data is None:
-        return data
-    return dash.no_update
+def track_despesas_deletions(current_data, previous_data, deleted_ids):
+    if previous_data is None or current_data is None:
+        return deleted_ids or []
+    
+    # Extrair IDs atuais e anteriores
+    current_ids = set()
+    for r in current_data:
+        if r.get('id') is not None and str(r.get('id')).strip():
+            try:
+                current_ids.add(int(r['id']))
+            except (ValueError, TypeError):
+                pass
+    
+    previous_ids = set()
+    for r in previous_data:
+        if r.get('id') is not None and str(r.get('id')).strip():
+            try:
+                previous_ids.add(int(r['id']))
+            except (ValueError, TypeError):
+                pass
+    
+    # Detectar remoções (cliques no X)
+    removed = previous_ids - current_ids
+    if removed:
+        deleted_list = deleted_ids or []
+        for rid in removed:
+            if rid not in deleted_list:
+                deleted_list.append(rid)
+        return deleted_list
+    
+    return deleted_ids or []
 
-# Capturar dados editados da tabela de despesas
+# Processar deleções de despesas
 @app.callback(
-    Output('temp-despesas-data', 'data'),
-    Input('datatable-despesas', 'data'),
+    Output('store-refresh-despesas', 'data', allow_duplicate=True),
+    Output('msg-despesas', 'children', allow_duplicate=True),
+    Output('deleted-despesas-ids', 'data', allow_duplicate=True),
+    Input('btn-deletar-despesas', 'n_clicks'),
+    State('deleted-despesas-ids', 'data'),
+    State('store-user', 'data'),
+    State('store-refresh-despesas', 'data'),
     prevent_initial_call=True
 )
-def capture_despesas_edits(data):
-    return data
+def deletar_despesas(n_clicks, deleted_ids, user, refresh):
+    if not n_clicks:
+        return dash.no_update, dash.no_update, dash.no_update
+    if not user or 'id' not in user:
+        return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000), dash.no_update
+    if not deleted_ids:
+        return dash.no_update, dbc.Alert("Nenhuma linha selecionada para deletar", color="warning", duration=3000), dash.no_update
+    
+    deletados = 0
+    for rid in deleted_ids:
+        try:
+            delete_transacao('despesas', rid, user['id'])
+            deletados += 1
+        except Exception as e:
+            print(f"Erro ao deletar despesa {rid}: {e}")
+    
+    if deletados > 0:
+        return (refresh or 0) + 1, dbc.Alert(f"✓ {deletados} despesa(s) deletada(s)", color="success", duration=4000), []
+    else:
+        return dash.no_update, dbc.Alert("Erro ao deletar despesas", color="danger", duration=3000), dash.no_update
 
 # Sync despesas (update/delete)
 @app.callback(
     Output('store-refresh-despesas', 'data', allow_duplicate=True),
     Output('msg-despesas', 'children'),
-    Output('original-despesas-data', 'data', allow_duplicate=True),
+    Output('deleted-despesas-ids', 'data', allow_duplicate=True),
     Input('btn-salvar-despesas', 'n_clicks'),
-    State('temp-despesas-data', 'data'),
-    State('original-despesas-data', 'data'),
+    State('datatable-despesas', 'data'),
+    State('deleted-despesas-ids', 'data'),
+    State('store-despesas', 'data'),
     State('store-user', 'data'),
     State('store-refresh-despesas', 'data'),
     prevent_initial_call=True
 )
-def sync_despesas(n_clicks, data, original_data, user, refresh):
+def sync_despesas(n_clicks, current_data, deleted_ids, all_data, user, refresh):
     if not n_clicks:
         return dash.no_update, "", dash.no_update
     if not user or 'id' not in user:
         return dash.no_update, dbc.Alert("Usuário não autenticado", color="danger", duration=3000), dash.no_update
-    if data is None:
+    if not current_data:
         return dash.no_update, dbc.Alert("Sem dados para salvar", color="warning", duration=3000), dash.no_update
     
-    # Mapear registros atuais da tabela
-    curr = {}
-    for r in data:
-        try:
-            if r.get('id') is not None and str(r.get('id')).strip():
-                curr[int(r['id'])] = r
-        except (ValueError, TypeError):
-            continue
-    
-    # Mapear registros originais da tabela (antes das edições)
-    orig = {}
-    if original_data:
-        for r in original_data:
+    # Mapear TODOS os registros do store (fonte de verdade)
+    all_records = {}
+    if all_data:
+        for r in all_data:
             try:
                 if r.get('id') is not None and str(r.get('id')).strip():
-                    orig[int(r['id'])] = r
+                    all_records[int(r['id'])] = r
             except (ValueError, TypeError):
                 continue
-    
-    curr_ids = set(curr.keys())
-    orig_ids = set(orig.keys())
-    
-    # IDs removidos manualmente da tabela
-    removed_ids = orig_ids - curr_ids
-    # IDs que existem em ambos (podem ter sido editados)
-    existing_ids = orig_ids & curr_ids
     
     deletados = 0
     atualizados = 0
     
-    # Deletar linhas removidas manualmente pelo usuário
-    for rid in removed_ids:
-        delete_transacao('despesas', rid, user['id'])
-        deletados += 1
-    
-    # Atualizar linhas modificadas
-    for rid in existing_ids:
-        new_row = _normalize_row(curr[rid])
-        old_row = _normalize_row(orig[rid])
-        if new_row != old_row:
-            update_transacao('despesas', rid, new_row, user['id'])
-            atualizados += 1
+    # Processar atualizações comparando tabela atual com store
+    if current_data:
+        for row in current_data:
+            try:
+                if row.get('id') is not None and str(row.get('id')).strip():
+                    rid = int(row['id'])
+                    if rid in all_records:
+                        new_row = _normalize_row(row)
+                        old_row = _normalize_row(all_records[rid])
+                        if new_row != old_row:
+                            update_transacao('despesas', rid, new_row, user['id'])
+                            atualizados += 1
+            except (ValueError, TypeError):
+                continue
     
     if atualizados > 0 or deletados > 0:
         msg_parts = []
@@ -479,12 +549,11 @@ def sync_despesas(n_clicks, data, original_data, user, refresh):
         if deletados > 0:
             msg_parts.append(f"{deletados} despesa(s) deletada(s)")
         mensagem = ", ".join(msg_parts)
-        # Resetar estado original após salvar
-        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000), None
+        return (refresh or 0) + 1, dbc.Alert(f"✓ {mensagem}", color="success", duration=4000), []
     else:
         return dash.no_update, dbc.Alert("Nenhuma alteração detectada", color="info", duration=3000), dash.no_update
 
-# Bar Graph            
+# Bar Graph# Bar Graph            
 @app.callback(
     Output('bar-graph', 'figure'),
     [Input('store-despesas', 'data'),
