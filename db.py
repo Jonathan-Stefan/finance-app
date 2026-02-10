@@ -260,6 +260,17 @@ def get_user_profile_photo(user_id):
     return '/assets/img_hom.png'
 
 
+def update_user_password(user_id, new_password):
+    """Atualiza a senha de um usuário"""
+    conn = connect_db()
+    cur = conn.cursor()
+    pw_hash = generate_password_hash(new_password)
+    cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (pw_hash, user_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
 # ---------- Funções de transações e categorias ---------- #
 
 def update_status_vencidos(user_id=None):
@@ -661,6 +672,7 @@ def init_planos_tables():
         cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS taxa_percentual REAL DEFAULT 0")
         cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS data_inicio TEXT")
         cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS valor_inicial REAL")
+        cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS iof_descontado REAL DEFAULT 0")
     except:
         pass
     
@@ -743,7 +755,7 @@ def get_montantes_by_user(user_id):
     engine = get_engine()
     df = pd.read_sql_query(
         """SELECT id, instituicao, tipo, valor, tipo_rendimento, taxa_percentual, 
-                  data_inicio, valor_inicial 
+                  data_inicio, valor_inicial, COALESCE(iof_descontado, 0) as iof_descontado
            FROM montantes WHERE user_id = %(user_id)s""",
         engine, params={"user_id": user_id}
     )
@@ -826,6 +838,39 @@ def save_anotacoes_planos(user_id, conteudo):
 
 # ========= Funções de Cálculo de Rendimento ========= #
 
+def calcular_iof(rendimento, dias_decorridos):
+    """
+    Calcula o IOF (Imposto sobre Operações Financeiras) sobre o rendimento
+    
+    Args:
+        rendimento: Valor do rendimento obtido
+        dias_decorridos: Número de dias desde o início do investimento
+    
+    Returns:
+        float: Valor do IOF a ser descontado (0 se dias >= 30)
+    """
+    from constants import TABELA_IOF
+    
+    # Não há IOF após 30 dias
+    if dias_decorridos >= 30:
+        return 0
+    
+    # Rendimentos negativos ou zero não têm IOF
+    if rendimento <= 0:
+        return 0
+    
+    # Busca a alíquota na tabela
+    # Para dias entre 1 e 30, usar a alíquota correspondente
+    # Para dia 0, usar alíquota do dia 1
+    dias_iof = max(1, min(30, dias_decorridos))
+    aliquota = TABELA_IOF.get(dias_iof, 0)
+    
+    # Calcula o IOF
+    iof = rendimento * (aliquota / 100)
+    
+    return round(iof, 2)
+
+
 def calcular_rendimento_investimento(valor_inicial, tipo_rendimento, taxa_percentual, dias_decorridos):
     """
     Calcula o rendimento de um investimento
@@ -879,6 +924,13 @@ def calcular_rendimento_investimento(valor_inicial, tipo_rendimento, taxa_percen
     valor_atual = valor_inicial * ((1 + taxa_diaria) ** dias_decorridos)
     rendimento_total = valor_atual - valor_inicial
     
+    # Cálculo do IOF sobre o rendimento
+    iof_descontado = calcular_iof(rendimento_total, dias_decorridos)
+    
+    # Valor líquido após IOF
+    rendimento_liquido = rendimento_total - iof_descontado
+    valor_liquido = valor_inicial + rendimento_liquido
+    
     # Estimativas de rendimento
     rendimento_diario = valor_atual * taxa_diaria
     rendimento_mensal = valor_atual * ((1 + taxa_diaria) ** 21 - 1)  # 21 dias úteis no mês
@@ -886,7 +938,10 @@ def calcular_rendimento_investimento(valor_inicial, tipo_rendimento, taxa_percen
     
     return {
         'valor_atual': round(valor_atual, 2),
+        'valor_liquido': round(valor_liquido, 2),  # Valor após desconto do IOF
         'rendimento_total': round(rendimento_total, 2),
+        'rendimento_liquido': round(rendimento_liquido, 2),  # Rendimento após IOF
+        'iof_descontado': round(iof_descontado, 2),
         'rendimento_diario': round(rendimento_diario, 2),
         'rendimento_mensal': round(rendimento_mensal, 2),
         'rendimento_anual': round(rendimento_anual, 2)
@@ -932,10 +987,10 @@ def atualizar_valores_investimentos(user_id):
             dias_decorridos
         )
         
-        # Atualiza valor no banco
+        # Atualiza valor no banco (usando valor líquido após IOF)
         cur.execute(
-            "UPDATE montantes SET valor = %s WHERE id = %s",
-            (resultado['valor_atual'], inv_id)
+            "UPDATE montantes SET valor = %s, iof_descontado = %s WHERE id = %s",
+            (resultado['valor_liquido'], resultado['iof_descontado'], inv_id)
         )
     
     conn.commit()

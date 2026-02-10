@@ -69,6 +69,42 @@ layout = dbc.Col([
                 backdrop=True
                 ),  
 
+    # Modal Trocar Senha ------------------------
+                dbc.Modal([
+                    dbc.ModalHeader(dbc.ModalTitle("Trocar Senha")),
+                    dbc.ModalBody([
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Senha Atual:"),
+                                dbc.Input(type="password", id="input-current-password", placeholder="Digite sua senha atual"),
+                            ], width=12),
+                        ], className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Nova Senha:"),
+                                dbc.Input(type="password", id="input-new-password", placeholder="Digite a nova senha"),
+                            ], width=12),
+                        ], className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("Confirmar Nova Senha:"),
+                                dbc.Input(type="password", id="input-confirm-password", placeholder="Confirme a nova senha"),
+                            ], width=12),
+                        ], className="mb-3"),
+                        html.Div(id="change-password-message", style={'margin-top': '10px'}),
+                    ]),
+                    dbc.ModalFooter([
+                        dbc.Button("Cancelar", id="cancel-change-password", color="secondary"),
+                        dbc.Button("Salvar Nova Senha", id="save-new-password", color="success"),
+                    ]),
+                ],
+                style={"background-color": "rgba(0, 0, 0, 0.5)"},
+                id="modal-change-password",
+                is_open=False,
+                centered=True,
+                backdrop=True
+                ),
+
     # Seção NOVO ------------------------
                 dbc.Row([
                     dbc.Col([
@@ -311,6 +347,15 @@ layout = dbc.Col([
             html.Div(id="admin-nav-link"),
             
             dbc.Button(
+                "Trocar Senha",
+                id="open-change-password",
+                color="warning",
+                outline=True,
+                className="w-100",
+                style={"margin-top": "10px"}
+            ),
+            
+            dbc.Button(
                 "Logout",
                 id="logout-button",
                 color="secondary",
@@ -444,6 +489,72 @@ def load_saved_avatar(user):
         photo_src = get_user_profile_photo(user['id'])
         return photo_src, photo_src
     return "/assets/img_hom.png", "/assets/img_hom.png"
+
+# Pop-up trocar senha
+@app.callback(
+    Output("modal-change-password", "is_open"),
+    Output("input-current-password", "value"),
+    Output("input-new-password", "value"),
+    Output("input-confirm-password", "value"),
+    Output("change-password-message", "children"),
+    Input("open-change-password", "n_clicks"),
+    Input("cancel-change-password", "n_clicks"),
+    Input("save-new-password", "n_clicks"),
+    State("modal-change-password", "is_open"),
+    State("input-current-password", "value"),
+    State("input-new-password", "value"),
+    State("input-confirm-password", "value"),
+    State('store-user', 'data'),
+    prevent_initial_call=True
+)
+def manage_change_password(n_open, n_cancel, n_save, is_open, current_password, new_password, confirm_password, user):
+    from db import verify_user, update_user_password
+    from security import validate_password_strength
+    
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return is_open, "", "", "", ""
+    
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    # Abrir modal
+    if button_id == "open-change-password":
+        return True, "", "", "", ""
+    
+    # Cancelar
+    if button_id == "cancel-change-password":
+        return False, "", "", "", ""
+    
+    # Salvar nova senha
+    if button_id == "save-new-password":
+        if not user or 'id' not in user or 'username' not in user:
+            return True, current_password, new_password, confirm_password, dbc.Alert("Erro: usuário não autenticado", color="danger")
+        
+        # Validar campos preenchidos
+        if not current_password or not new_password or not confirm_password:
+            return True, current_password, new_password, confirm_password, dbc.Alert("Preencha todos os campos", color="warning")
+        
+        # Verificar senha atual
+        if not verify_user(user['username'], current_password):
+            return True, current_password, new_password, confirm_password, dbc.Alert("Senha atual incorreta", color="danger")
+        
+        # Verificar se as novas senhas coincidem
+        if new_password != confirm_password:
+            return True, current_password, new_password, confirm_password, dbc.Alert("As senhas não coincidem", color="warning")
+        
+        # Validar força da nova senha
+        is_valid, message = validate_password_strength(new_password)
+        if not is_valid:
+            return True, current_password, new_password, confirm_password, dbc.Alert(message, color="warning")
+        
+        # Atualizar senha
+        try:
+            update_user_password(user['id'], new_password)
+            return False, "", "", "", dbc.Alert("Senha alterada com sucesso!", color="success")
+        except Exception as e:
+            return True, current_password, new_password, confirm_password, dbc.Alert(f"Erro ao alterar senha: {str(e)}", color="danger")
+    
+    return is_open, current_password, new_password, confirm_password, ""
 
 # Add/Remove categoria despesa
 @app.callback(

@@ -288,7 +288,20 @@ layout = dbc.Col([
                                     html.Strong("Rendimento estimado anual: "),
                                     html.Span("R$ 0,00", id="display-rendimento-anual",
                                             style={"color": "#27ae60"})
+                                ], className="mb-1"),
+                                html.Hr(),
+                                html.P([
+                                    html.Strong("IOF a ser descontado: "),
+                                    html.Span("R$ 0,00", id="display-iof-descontado",
+                                            style={"color": "#e74c3c"})
+                                ], className="mb-1"),
+                                html.P([
+                                    html.Strong("Valor líquido atual: "),
+                                    html.Span("R$ 0,00", id="display-valor-liquido",
+                                            style={"color": "#2980b9", "font-weight": "bold"})
                                 ], className="mb-0"),
+                                html.Small("IOF: 0% após 30 dias, regressivo até 96% no 1º dia", 
+                                         className="text-muted", style={"display": "block", "margin-top": "8px"})
                             ])
                         ])
                     ], color="light", className="mb-2")
@@ -574,10 +587,15 @@ def update_tabela_montantes(montantes):
     
     rows = []
     for montante in montantes:
+        # IOF formatado
+        iof = montante.get('iof_descontado', 0)
+        iof_display = f"R$ {iof:,.2f}" if iof > 0 else "-"
+        
         rows.append(html.Tr([
             html.Td(montante["instituicao"]),
             html.Td(montante["tipo"]),
             html.Td(f"R$ {montante['valor']:,.2f}", className="text-end"),
+            html.Td(iof_display, className="text-end", style={"color": "#e74c3c" if iof > 0 else "inherit"}),
             html.Td([
                 dbc.Button("🗑️", color="danger", size="sm",
                           id={"type": "btn-delete-montante", "index": montante['id']})
@@ -586,9 +604,12 @@ def update_tabela_montantes(montantes):
     
     # Total
     total = sum([m["valor"] for m in montantes])
+    total_iof = sum([m.get("iof_descontado", 0) for m in montantes])
     rows.append(html.Tr([
         html.Td(html.Strong("Total Geral"), colSpan=2),
         html.Td(html.Strong(f"R$ {total:,.2f}"), className="text-end"),
+        html.Td(html.Strong(f"R$ {total_iof:,.2f}"), className="text-end", 
+               style={"color": "#e74c3c" if total_iof > 0 else "inherit"}),
         html.Td(""),
     ], style={"background-color": "#f8f9fa"}))
     
@@ -596,7 +617,9 @@ def update_tabela_montantes(montantes):
         html.Thead(html.Tr([
             html.Th("Nome", style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Tipo", style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
-            html.Th("Valor Acumulado", className="text-end", 
+            html.Th("Valor Líquido", className="text-end", 
+                   style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
+            html.Th("IOF Descontado", className="text-end",
                    style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
             html.Th("Ações", className="text-center",
                    style={"background-color": "#2c3e50", "color": "white", "font-weight": "bold"}),
@@ -765,7 +788,9 @@ def toggle_modal_plano(n1, n2, n3, n4, is_open):
 @app.callback(
     [Output("display-rendimento-diario", "children"),
      Output("display-rendimento-mensal", "children"),
-     Output("display-rendimento-anual", "children")],
+     Output("display-rendimento-anual", "children"),
+     Output("display-iof-descontado", "children"),
+     Output("display-valor-liquido", "children")],
     [Input("input-valor-inicial-montante", "value"),
      Input("select-tipo-rendimento", "value"),
      Input("input-taxa-rendimento", "value"),
@@ -776,7 +801,7 @@ def calcular_rendimentos_display(valor_inicial, tipo_rendimento, taxa, data_inic
     from datetime import datetime, date
     
     if not valor_inicial or not tipo_rendimento or tipo_rendimento == "Sem rendimento":
-        return "R$ 0,00", "R$ 0,00", "R$ 0,00"
+        return "R$ 0,00", "R$ 0,00", "R$ 0,00", "R$ 0,00", "R$ 0,00"
     
     valor_inicial = float(valor_inicial) if valor_inicial else 0
     taxa = float(taxa) if taxa else 0
@@ -800,9 +825,10 @@ def calcular_rendimentos_display(valor_inicial, tipo_rendimento, taxa, data_inic
     return (
         f"R$ {resultado['rendimento_diario']:.2f}",
         f"R$ {resultado['rendimento_mensal']:.2f}",
-        f"R$ {resultado['rendimento_anual']:.2f}"
+        f"R$ {resultado['rendimento_anual']:.2f}",
+        f"R$ {resultado['iof_descontado']:.2f}",
+        f"R$ {resultado['valor_liquido']:.2f}"
     )
-    return is_open
 
 
 @app.callback(

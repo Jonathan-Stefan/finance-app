@@ -125,3 +125,38 @@ class TipoRendimento(str, Enum):
 TAXA_CDI_ANUAL = 10.65  # % ao ano (exemplo: 10.65% a.a.)
 TAXA_SELIC_ANUAL = 10.75  # % ao ano
 TAXA_IPCA_ANUAL = 4.50  # % ao ano
+
+# Tabela de IOF Regressivo (aplicável a investimentos com resgate antes de 30 dias)
+# Formato: (dias_corridos, alíquota_percentual)
+TABELA_IOF = {
+    1: 96.0,
+    2: 93.0,
+    3: 90.0,
+    4: 86.0,
+    5: 83.0,
+    6: 80.0,
+    7: 76.0,
+    8: 73.0,
+    9: 70.0,
+    10: 66.0,
+    11: 63.0,
+    12: 60.0,
+    13: 56.0,
+    14: 53.0,
+    15: 50.0,
+    16: 46.0,
+    17: 43.0,
+    18: 40.0,
+    19: 36.0,
+    20: 33.0,
+    21: 30.0,
+    22: 26.0,
+    23: 23.0,
+    24: 20.0,
+    25: 16.0,
+    26: 13.0,
+    27: 10.0,
+    28: 6.0,
+    29: 3.0,
+    30: 0.0
+}

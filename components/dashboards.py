@@ -217,16 +217,33 @@ def saldo_total(despesas, receitas, start_date, end_date):
     if not df_receitas.empty and 'plano_id' in df_receitas.columns:
         df_receitas = df_receitas[df_receitas['plano_id'].isna()]
     
-    # Filtrar despesas por período
-    if not df_despesas.empty and 'Data' in df_despesas.columns and start_date and end_date:
+    # Calcular saldo anterior (antes do período selecionado)
+    saldo_anterior = 0
+    if start_date and not df_despesas.empty and 'Data' in df_despesas.columns:
         df_despesas['Data'] = pd.to_datetime(df_despesas['Data'], errors='coerce')
+        start = pd.to_datetime(start_date, errors='coerce')
+        
+        if not pd.isna(start):
+            # Despesas antes do período
+            despesas_anteriores = df_despesas[df_despesas['Data'] < start]['Valor'].sum() if 'Valor' in df_despesas.columns else 0
+            
+            # Receitas antes do período
+            receitas_anteriores = 0
+            if not df_receitas.empty and 'Data' in df_receitas.columns:
+                df_receitas['Data'] = pd.to_datetime(df_receitas['Data'], errors='coerce')
+                receitas_anteriores = df_receitas[df_receitas['Data'] < start]['Valor'].sum() if 'Valor' in df_receitas.columns else 0
+            
+            saldo_anterior = receitas_anteriores - despesas_anteriores
+    
+    # Filtrar despesas por período atual
+    if not df_despesas.empty and 'Data' in df_despesas.columns and start_date and end_date:
         start = pd.to_datetime(start_date, errors='coerce')
         end = pd.to_datetime(end_date, errors='coerce')
         if not pd.isna(start) and not pd.isna(end):
             mask = (df_despesas['Data'] >= start) & (df_despesas['Data'] <= end)
             df_despesas = df_despesas.loc[mask]
     
-    # Filtrar receitas por período
+    # Filtrar receitas por período atual
     if not df_receitas.empty and 'Data' in df_receitas.columns and start_date and end_date:
         df_receitas['Data'] = pd.to_datetime(df_receitas['Data'], errors='coerce')
         start = pd.to_datetime(start_date, errors='coerce')
@@ -235,9 +252,13 @@ def saldo_total(despesas, receitas, start_date, end_date):
             mask = (df_receitas['Data'] >= start) & (df_receitas['Data'] <= end)
             df_receitas = df_receitas.loc[mask]
 
+    # Calcular saldo do período atual
     valor_despesas = df_despesas['Valor'].sum() if not df_despesas.empty and 'Valor' in df_despesas.columns else 0
     valor_receitas = df_receitas['Valor'].sum() if not df_receitas.empty and 'Valor' in df_receitas.columns else 0
-    valor = valor_receitas - valor_despesas
+    saldo_periodo = valor_receitas - valor_despesas
+    
+    # Saldo total = saldo anterior + saldo do período
+    valor = saldo_anterior + saldo_periodo
 
     return f"R$ {valor:.2f}"
     
