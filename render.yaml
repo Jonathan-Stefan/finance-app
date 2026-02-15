@@ -7,7 +7,7 @@ services:
     env: python
     region: oregon
     plan: free  # Mude para 'starter' para produção
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python scripts/migrate_add_cartoes.py
     startCommand: gunicorn myindex:server --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
