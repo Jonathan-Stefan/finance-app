@@ -235,12 +235,12 @@ def mostrar_orcamentos(mes, ano, user, refresh_orc, refresh_desp):
                         className="mt-2"
                     )
                 ])
-            ], color=cor_card, outline=True)
+            ], color=cor_card, outline=True, style={"height": "100%"})
         ], xs=12, sm=6, md=4, lg=3, className="mb-3")
         
         cards.append(card)
     
-    return dbc.Row(cards)
+    return dbc.Row(cards, className="equal-height-row")
 
 
 # Deletar orçamento

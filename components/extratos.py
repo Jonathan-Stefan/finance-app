@@ -175,7 +175,11 @@ layout = dbc.Col([
 
     dbc.Row([
         dbc.Col([
-            dcc.Graph(id='bar-graph', style={"margin-right": "20px"}),
+            dbc.Card(
+                dcc.Graph(id='bar-graph', style={"height": "340px"}),
+                style={"padding": "10px", "height": "360px"},
+                className="extratos-resumo-card"
+            )
         ], width=9),
 
         dbc.Col([
@@ -184,9 +188,12 @@ layout = dbc.Col([
                     html.H4("Despesas"),
                     html.Legend("R$ -", id="valor_despesa_card", style={'font-size': '60px'}),
                     html.H6("Total de despesas"),
-                ], style={'text-align': 'center', 'padding-top': '30px'}))
+                ], style={'text-align': 'center', 'padding-top': '30px'}),
+                style={"height": "360px"},
+                className="extratos-resumo-card"
+            )
         ], width=3),
-    ], className="mt-4"),
+    ], className="mt-4 equal-height-row extratos-resumo-row"),
 ], style={"padding": "10px"})
 
 # =========  Callbacks  =========== #

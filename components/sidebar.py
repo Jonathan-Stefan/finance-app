@@ -116,7 +116,7 @@ layout = dbc.Col([
                         dbc.Button(color="danger", id="open-novo-despesa",
                                 children=["- Despesa"], className="w-100"),
                     ], xs=6, sm=6, md=6)
-                ], className="mb-3"),
+                ], className="mb-3 equal-height-row"),
 
 
                 # Modal Receita            

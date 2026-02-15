@@ -14,7 +14,7 @@ from dash_bootstrap_templates import ThemeChangerAIO, template_from_url
 
 # Local imports
 from app import app
-from constants import GRAPH_MARGIN
+from constants import GRAPH_MARGIN, StatusDespesa
 from globals import *
 
 card_icon = {
@@ -35,6 +35,55 @@ else:
     # Fim do mês atual
 end_date = (next_month - timedelta(days=1)).date()
 
+
+def _normalize_despesas_for_saldo(df):
+    """Normaliza despesas e mantém apenas colunas necessárias para regras de saldo."""
+    if df.empty:
+        return df
+
+    if 'Status' not in df.columns:
+        if 'Efetuado' in df.columns:
+            df['Status'] = df['Efetuado'].apply(lambda x: StatusDespesa.PAGO if x == 1 else StatusDespesa.A_VENCER)
+        else:
+            df['Status'] = StatusDespesa.A_VENCER
+
+    df['Status'] = df['Status'].fillna(StatusDespesa.A_VENCER)
+
+    if 'Valor' in df.columns:
+        df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
+
+    return df
+
+
+def _normalize_receitas_for_saldo(df):
+    """Normaliza receitas e mantém apenas colunas necessárias para regras de saldo."""
+    if df.empty:
+        return df
+
+    if 'Efetuado' not in df.columns:
+        df['Efetuado'] = 1
+
+    df['Efetuado'] = pd.to_numeric(df['Efetuado'], errors='coerce').fillna(0)
+
+    if 'Valor' in df.columns:
+        df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
+
+    return df
+
+
+def _apply_saldo_rules(df_despesas, df_receitas):
+    """Aplica regra de saldo: despesas em aberto e receitas efetivadas."""
+    df_despesas = _normalize_despesas_for_saldo(df_despesas)
+    df_receitas = _normalize_receitas_for_saldo(df_receitas)
+
+    if not df_despesas.empty and 'Status' in df_despesas.columns:
+        df_despesas = df_despesas[df_despesas['Status'] != StatusDespesa.PAGO]
+
+    if not df_receitas.empty and 'Efetuado' in df_receitas.columns:
+        df_receitas = df_receitas[df_receitas['Efetuado'] == 1]
+
+    return df_despesas, df_receitas
+
 # =========  Layout  =========== #
 layout = dbc.Col([
         dbc.Row([
@@ -51,7 +100,7 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], xs=12, sm=12, md=4, lg=4),
+            ], xs=12, sm=12, md=3, lg=3),
 
             # Receita
             dbc.Col([
@@ -66,14 +115,14 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], xs=12, sm=12, md=4, lg=4),
+            ], xs=12, sm=12, md=3, lg=3),
 
-            # Despesa
+            # Despesas totais
             dbc.Col([
                 dbc.CardGroup([
                     dbc.Card([
-                        html.Legend("Despesas"),
-                        html.H5("R$ -", id="p-despesa-dashboards"),
+                        html.Legend("Despesas totais"),
+                        html.H5("R$ -", id="p-despesa-total-dashboards"),
                     ], style={"padding-left": "20px", "padding-top": "10px"}),
                     dbc.Card(
                         html.Div(className="fa fa-meh-o", style=card_icon), 
@@ -81,7 +130,22 @@ layout = dbc.Col([
                         style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
                     )
                 ])
-            ], xs=12, sm=12, md=4, lg=4),
+            ], xs=12, sm=12, md=3, lg=3),
+
+            # Despesas em aberto
+            dbc.Col([
+                dbc.CardGroup([
+                    dbc.Card([
+                        html.Legend("Desp. em aberto"),
+                        html.H5("R$ -", id="p-despesa-dashboards"),
+                    ], style={"padding-left": "20px", "padding-top": "10px"}),
+                    dbc.Card(
+                        html.Div(className="fa fa-clock-o", style=card_icon), 
+                        color="warning",
+                        style={"maxWidth": 75, "height": 100, "margin-left": "-10px"},
+                    )
+                ])
+            ], xs=12, sm=12, md=3, lg=3),
         ], className="g-2 mb-2"),
 
         # Alertas de Orçamento
@@ -126,19 +190,19 @@ layout = dbc.Col([
                         id='date-picker-config',
                         display_format='DD/MM/YYYY',
                         style={'z-index': '100'}),
-                ], style={"padding": "20px"}), 
+                ], style={"padding": "20px", "height": "100%"}), 
             ], xs=12, sm=12, md=12, lg=4, className="mb-3"),
 
             dbc.Col(
-                dbc.Card(dcc.Graph(id="graph1"), style={"padding": "10px"}), xs=12, sm=12, md=12, lg=8, className="mb-3"
+                dbc.Card(dcc.Graph(id="graph1"), style={"padding": "10px", "height": "100%"}), xs=12, sm=12, md=12, lg=8, className="mb-3"
             ),
-        ], className="g-2"),
+        ], className="g-2 equal-height-row"),
 
         dbc.Row([
-            dbc.Col(dbc.Card(dcc.Graph(id="graph2"), style={"padding": "10px"}), xs=12, sm=12, md=12, lg=6, className="mb-3"),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph3"), style={"padding": "10px"}), xs=12, sm=6, md=6, lg=3, className="mb-3"),
-            dbc.Col(dbc.Card(dcc.Graph(id="graph4"), style={"padding": "10px"}), xs=12, sm=6, md=6, lg=3, className="mb-3"),
-        ], className="g-2")
+            dbc.Col(dbc.Card(dcc.Graph(id="graph2"), style={"padding": "10px", "height": "100%"}), xs=12, sm=12, md=12, lg=6, className="mb-3"),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph3"), style={"padding": "10px", "height": "100%"}), xs=12, sm=6, md=6, lg=3, className="mb-3"),
+            dbc.Col(dbc.Card(dcc.Graph(id="graph4"), style={"padding": "10px", "height": "100%"}), xs=12, sm=6, md=6, lg=3, className="mb-3"),
+        ], className="g-2 equal-height-row")
     ])
 
 
@@ -160,6 +224,11 @@ def populate_dropdownvalues_receitas(data, start_date, end_date):
     
     if df.empty or 'Categoria' not in df.columns or 'Valor' not in df.columns:
         return [[], [], "R$ 0"]
+
+    # Regra consistente com saldo: considerar apenas receitas efetivadas
+    df = _normalize_receitas_for_saldo(df)
+    if 'Efetuado' in df.columns:
+        df = df[df['Efetuado'] == 1]
     
     # Filtrar por período se houver dados de data
     if 'Data' in df.columns and start_date and end_date:
@@ -178,6 +247,7 @@ def populate_dropdownvalues_receitas(data, start_date, end_date):
 # Dropdown Despesa
 @app.callback([Output("dropdown-despesa", "options"),
     Output("dropdown-despesa", "value"),
+    Output("p-despesa-total-dashboards", "children"),
     Output("p-despesa-dashboards", "children")],
     [Input("store-despesas", "data"),
     Input('date-picker-config', 'start_date'),
@@ -186,21 +256,26 @@ def populate_dropdownvalues_despesas(data, start_date, end_date):
     df = pd.DataFrame(data)
     
     if df.empty or 'Categoria' not in df.columns or 'Valor' not in df.columns:
-        return [[], [], "R$ 0"]
+        return [[], [], "R$ 0", "R$ 0"]
+
+    df_total = _normalize_despesas_for_saldo(df.copy())
     
     # Filtrar por período se houver dados de data
-    if 'Data' in df.columns and start_date and end_date:
-        df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+    if 'Data' in df_total.columns and start_date and end_date:
+        df_total['Data'] = pd.to_datetime(df_total['Data'], errors='coerce')
         start = pd.to_datetime(start_date, errors='coerce')
         end = pd.to_datetime(end_date, errors='coerce')
         if not pd.isna(start) and not pd.isna(end):
-            mask = (df['Data'] >= start) & (df['Data'] <= end)
-            df = df.loc[mask]
-    
-    valor = df['Valor'].sum()
-    val = df.Categoria.unique().tolist()
+            mask = (df_total['Data'] >= start) & (df_total['Data'] <= end)
+            df_total = df_total.loc[mask]
 
-    return [([{"label": x, "value": x} for x in df.Categoria.unique()]), val, f"R$ {valor:.2f}"]
+    df_abertas = df_total[df_total['Status'] != StatusDespesa.PAGO] if 'Status' in df_total.columns else df_total
+
+    valor_total = df_total['Valor'].sum() if not df_total.empty else 0
+    valor_abertas = df_abertas['Valor'].sum() if not df_abertas.empty else 0
+    val = df_total.Categoria.unique().tolist() if not df_total.empty else []
+
+    return [([{"label": x, "value": x} for x in val]), val, f"R$ {valor_total:.2f}", f"R$ {valor_abertas:.2f}"]
 
 # VALOR - saldo
 @app.callback(
@@ -217,6 +292,10 @@ def saldo_total(despesas, receitas, start_date, end_date):
     if not df_receitas.empty and 'plano_id' in df_receitas.columns:
         df_receitas = df_receitas[df_receitas['plano_id'].isna()]
     
+    # Normalização para regras de saldo
+    df_despesas = _normalize_despesas_for_saldo(df_despesas)
+    df_receitas = _normalize_receitas_for_saldo(df_receitas)
+
     # Calcular saldo anterior (antes do período selecionado)
     saldo_anterior = 0
     if start_date and not df_despesas.empty and 'Data' in df_despesas.columns:
@@ -224,14 +303,22 @@ def saldo_total(despesas, receitas, start_date, end_date):
         start = pd.to_datetime(start_date, errors='coerce')
         
         if not pd.isna(start):
-            # Despesas antes do período
-            despesas_anteriores = df_despesas[df_despesas['Data'] < start]['Valor'].sum() if 'Valor' in df_despesas.columns else 0
+            # Despesas em aberto antes do período (não pagas)
+            despesas_anteriores_df = df_despesas[
+                (df_despesas['Data'] < start) &
+                (df_despesas['Status'] != StatusDespesa.PAGO)
+            ]
+            despesas_anteriores = despesas_anteriores_df['Valor'].sum() if 'Valor' in despesas_anteriores_df.columns else 0
             
-            # Receitas antes do período
+            # Receitas efetivadas antes do período
             receitas_anteriores = 0
             if not df_receitas.empty and 'Data' in df_receitas.columns:
                 df_receitas['Data'] = pd.to_datetime(df_receitas['Data'], errors='coerce')
-                receitas_anteriores = df_receitas[df_receitas['Data'] < start]['Valor'].sum() if 'Valor' in df_receitas.columns else 0
+                receitas_anteriores_df = df_receitas[
+                    (df_receitas['Data'] < start) &
+                    (df_receitas['Efetuado'] == 1)
+                ]
+                receitas_anteriores = receitas_anteriores_df['Valor'].sum() if 'Valor' in receitas_anteriores_df.columns else 0
             
             saldo_anterior = receitas_anteriores - despesas_anteriores
     
@@ -253,12 +340,31 @@ def saldo_total(despesas, receitas, start_date, end_date):
             df_receitas = df_receitas.loc[mask]
 
     # Calcular saldo do período atual
-    valor_despesas = df_despesas['Valor'].sum() if not df_despesas.empty and 'Valor' in df_despesas.columns else 0
-    valor_receitas = df_receitas['Valor'].sum() if not df_receitas.empty and 'Valor' in df_receitas.columns else 0
+    # Considera apenas despesas em aberto (não pagas)
+    if not df_despesas.empty and 'Status' in df_despesas.columns:
+        df_despesas_abertas = df_despesas[df_despesas['Status'] != StatusDespesa.PAGO]
+    else:
+        df_despesas_abertas = df_despesas
+
+    # Considera apenas receitas efetivadas
+    if not df_receitas.empty and 'Efetuado' in df_receitas.columns:
+        df_receitas_efetivadas = df_receitas[df_receitas['Efetuado'] == 1]
+    else:
+        df_receitas_efetivadas = df_receitas
+
+    valor_despesas = df_despesas_abertas['Valor'].sum() if not df_despesas_abertas.empty and 'Valor' in df_despesas_abertas.columns else 0
+    valor_receitas = df_receitas_efetivadas['Valor'].sum() if not df_receitas_efetivadas.empty and 'Valor' in df_receitas_efetivadas.columns else 0
     saldo_periodo = valor_receitas - valor_despesas
     
     # Saldo total = saldo anterior + saldo do período
     valor = saldo_anterior + saldo_periodo
+
+    # Só permite saldo negativo quando houver conta vencida sem pagar
+    possui_vencido = False
+    if not df_despesas.empty and 'Status' in df_despesas.columns:
+        possui_vencido = (df_despesas['Status'] == StatusDespesa.VENCIDO).any()
+    if valor < 0 and not possui_vencido:
+        valor = 0
 
     return f"R$ {valor:.2f}"
     
@@ -277,6 +383,9 @@ def update_output(data_despesa, data_receita, despesa, receita, theme):
     # Excluir receitas que são destinadas a planos específicos
     if not df_rc.empty and 'plano_id' in df_rc.columns:
         df_rc = df_rc[df_rc['plano_id'].isna()]
+
+    # Regras consistentes com saldo (despesas em aberto e receitas efetivadas)
+    df_ds, df_rc = _apply_saldo_rules(df_ds, df_rc)
 
     # Validar se DataFrames têm colunas necessárias
     fig = go.Figure()
@@ -350,6 +459,9 @@ def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_da
     if not df_rc.empty and 'plano_id' in df_rc.columns:
         df_rc = df_rc[df_rc['plano_id'].isna()]
 
+    # Regras consistentes com saldo (despesas em aberto e receitas efetivadas)
+    df_ds, df_rc = _apply_saldo_rules(df_ds, df_rc)
+
     # Validar colunas necessárias
     if df_rc.empty or 'Categoria' not in df_rc.columns or 'Valor' not in df_rc.columns or 'Data' not in df_rc.columns:
         df_rc = pd.DataFrame(columns=['Data', 'Valor', 'Categoria', 'Output'])
@@ -414,6 +526,11 @@ def graph2_show(data_receita, data_despesa, receita, despesa, start_date, end_da
 )
 def pie_receita(data_receita, receita, theme):
     df = pd.DataFrame(data_receita)
+
+    # Regras consistentes com saldo para receitas
+    df = _normalize_receitas_for_saldo(df)
+    if not df.empty and 'Efetuado' in df.columns:
+        df = df[df['Efetuado'] == 1]
     
     # Verifica se o DataFrame está vazio ou não tem dados
     if df.empty or 'Categoria' not in df.columns:
@@ -445,6 +562,11 @@ def pie_receita(data_receita, receita, theme):
 )
 def pie_despesa(data_despesa, despesa, theme):
     df = pd.DataFrame(data_despesa)
+
+    # Regras consistentes com saldo para despesas
+    df = _normalize_despesas_for_saldo(df)
+    if not df.empty and 'Status' in df.columns:
+        df = df[df['Status'] != StatusDespesa.PAGO]
     
     # Verifica se o DataFrame está vazio ou não tem dados
     if df.empty or 'Categoria' not in df.columns:

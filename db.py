@@ -655,6 +655,7 @@ def init_planos_tables():
     cur.execute("""CREATE TABLE IF NOT EXISTS montantes (
         id SERIAL PRIMARY KEY,
         instituicao TEXT,
+        nome_investimento TEXT,
         tipo TEXT,
         valor REAL,
         tipo_rendimento TEXT DEFAULT 'Sem rendimento',
@@ -673,6 +674,7 @@ def init_planos_tables():
         cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS data_inicio TEXT")
         cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS valor_inicial REAL")
         cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS iof_descontado REAL DEFAULT 0")
+        cur.execute("ALTER TABLE montantes ADD COLUMN IF NOT EXISTS nome_investimento TEXT")
     except:
         pass
     
@@ -682,6 +684,21 @@ def init_planos_tables():
         conteudo TEXT,
         user_id INTEGER UNIQUE,
         updated_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )""")
+
+    # Tabela de aportes em investimentos (permite múltiplos aportes por montante)
+    cur.execute("""CREATE TABLE IF NOT EXISTS montante_aportes (
+        id SERIAL PRIMARY KEY,
+        montante_id INTEGER,
+        valor REAL,
+        data_aporte TEXT,
+        quantidade REAL,
+        preco_unitario REAL,
+        ticker TEXT,
+        user_id INTEGER,
+        created_at TEXT,
+        FOREIGN KEY (montante_id) REFERENCES montantes (id),
         FOREIGN KEY (user_id) REFERENCES users (id)
     )""")
     
@@ -754,7 +771,8 @@ def get_montantes_by_user(user_id):
     """Retorna todos os montantes/investimentos de um usuário"""
     engine = get_engine()
     df = pd.read_sql_query(
-        """SELECT id, instituicao, tipo, valor, tipo_rendimento, taxa_percentual, 
+        """SELECT id, instituicao, COALESCE(nome_investimento, instituicao) AS nome_investimento,
+                  tipo, valor, tipo_rendimento, taxa_percentual, 
                   data_inicio, valor_inicial, COALESCE(iof_descontado, 0) as iof_descontado
            FROM montantes WHERE user_id = %(user_id)s""",
         engine, params={"user_id": user_id}
@@ -763,17 +781,17 @@ def get_montantes_by_user(user_id):
     return df.to_dict('records')
 
 
-def insert_montante(instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, user_id):
+def insert_montante(instituicao, nome_investimento, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, user_id):
     """Insere um novo investimento/montante"""
     from datetime import datetime
     conn = connect_db()
     cur = conn.cursor()
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cur.execute(
-        """INSERT INTO montantes (instituicao, tipo, valor, tipo_rendimento, taxa_percentual, 
+        """INSERT INTO montantes (instituicao, nome_investimento, tipo, valor, tipo_rendimento, taxa_percentual, 
                                    data_inicio, valor_inicial, user_id, created_at) 
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        (instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, user_id, created_at)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (instituicao, nome_investimento, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, user_id, created_at)
     )
     montante_id = cur.fetchone()[0]
     conn.commit()
@@ -781,15 +799,15 @@ def insert_montante(instituicao, tipo, valor, tipo_rendimento, taxa_percentual, 
     return montante_id
 
 
-def update_montante(montante_id, instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial):
+def update_montante(montante_id, instituicao, nome_investimento, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial):
     """Atualiza um investimento/montante existente"""
     conn = connect_db()
     cur = conn.cursor()
     cur.execute(
-        """UPDATE montantes SET instituicao = %s, tipo = %s, valor = %s, tipo_rendimento = %s, 
+        """UPDATE montantes SET instituicao = %s, nome_investimento = %s, tipo = %s, valor = %s, tipo_rendimento = %s, 
                                 taxa_percentual = %s, data_inicio = %s, valor_inicial = %s 
            WHERE id = %s""",
-        (instituicao, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, montante_id)
+        (instituicao, nome_investimento, tipo, valor, tipo_rendimento, taxa_percentual, data_inicio, valor_inicial, montante_id)
     )
     conn.commit()
     conn.close()
@@ -799,9 +817,53 @@ def delete_montante(montante_id, user_id):
     """Deleta um montante"""
     conn = connect_db()
     cur = conn.cursor()
+    cur.execute("DELETE FROM montante_aportes WHERE montante_id = %s AND user_id = %s", (montante_id, user_id))
     cur.execute("DELETE FROM montantes WHERE id = %s AND user_id = %s", (montante_id, user_id))
     conn.commit()
     conn.close()
+
+
+def insert_montante_aporte(montante_id, valor, data_aporte, user_id, quantidade=None, preco_unitario=None, ticker=None):
+    """Insere um aporte em um investimento existente"""
+    from datetime import datetime
+    conn = connect_db()
+    cur = conn.cursor()
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cur.execute(
+        """INSERT INTO montante_aportes (montante_id, valor, data_aporte, quantidade, preco_unitario, ticker, user_id, created_at)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (montante_id, valor, data_aporte, quantidade, preco_unitario, ticker, user_id, created_at)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_montante_aportes(montante_id, user_id):
+    """Retorna todos os aportes de um investimento específico"""
+    engine = get_engine()
+    df = pd.read_sql_query(
+        """SELECT id, montante_id, valor, data_aporte, quantidade, preco_unitario, ticker
+           FROM montante_aportes
+           WHERE montante_id = %(montante_id)s AND user_id = %(user_id)s
+           ORDER BY data_aporte ASC, id ASC""",
+        engine, params={"montante_id": montante_id, "user_id": user_id}
+    )
+    return df.to_dict('records')
+
+
+def get_aportes_by_user(user_id):
+    """Retorna todos os aportes de investimentos de um usuário"""
+    engine = get_engine()
+    df = pd.read_sql_query(
+        """SELECT a.id, a.montante_id, a.valor, a.data_aporte, a.quantidade, a.preco_unitario, a.ticker,
+                  m.instituicao, COALESCE(m.nome_investimento, m.instituicao) AS nome_investimento, m.tipo
+           FROM montante_aportes a
+           LEFT JOIN montantes m ON m.id = a.montante_id
+           WHERE a.user_id = %(user_id)s
+           ORDER BY a.data_aporte DESC, a.id DESC""",
+        engine, params={"user_id": user_id}
+    )
+    return df.to_dict('records')
 
 
 def get_anotacoes_planos(user_id):
@@ -968,29 +1030,62 @@ def atualizar_valores_investimentos(user_id):
     
     for inv in investimentos:
         inv_id, valor_inicial, tipo_rendimento, taxa_percentual, data_inicio_str = inv
-        
-        if not valor_inicial or not data_inicio_str:
+
+        if not data_inicio_str:
             continue
-        
-        # Calcula dias decorridos
-        data_inicio = datetime.strptime(data_inicio_str, '%Y-%m-%d').date()
-        dias_decorridos = (hoje - data_inicio).days
-        
-        if dias_decorridos < 0:
-            dias_decorridos = 0
-        
-        # Calcula novo valor
-        resultado = calcular_rendimento_investimento(
-            valor_inicial, 
-            tipo_rendimento or "Sem rendimento", 
-            taxa_percentual or 0, 
-            dias_decorridos
+
+        # Base inicial do investimento (aporte original)
+        aportes = []
+        if valor_inicial and valor_inicial > 0:
+            aportes.append({
+                'valor': float(valor_inicial),
+                'data_aporte': data_inicio_str
+            })
+
+        # Aportes adicionais
+        cur.execute(
+            """SELECT valor, data_aporte FROM montante_aportes
+               WHERE montante_id = %s AND user_id = %s
+               ORDER BY data_aporte ASC, id ASC""",
+            (inv_id, user_id)
         )
-        
-        # Atualiza valor no banco (usando valor líquido após IOF)
+        for valor_aporte, data_aporte in cur.fetchall():
+            if valor_aporte and data_aporte:
+                aportes.append({
+                    'valor': float(valor_aporte),
+                    'data_aporte': data_aporte
+                })
+
+        if not aportes:
+            continue
+
+        valor_total_liquido = 0
+        iof_total = 0
+
+        for aporte in aportes:
+            try:
+                data_aporte = datetime.strptime(aporte['data_aporte'], '%Y-%m-%d').date()
+            except Exception:
+                continue
+
+            dias_decorridos = (hoje - data_aporte).days
+            if dias_decorridos < 0:
+                dias_decorridos = 0
+
+            resultado_aporte = calcular_rendimento_investimento(
+                aporte['valor'],
+                tipo_rendimento or "Sem rendimento",
+                taxa_percentual or 0,
+                dias_decorridos
+            )
+
+            valor_total_liquido += resultado_aporte['valor_liquido']
+            iof_total += resultado_aporte['iof_descontado']
+
+        # Atualiza valor consolidado do investimento
         cur.execute(
             "UPDATE montantes SET valor = %s, iof_descontado = %s WHERE id = %s",
-            (resultado['valor_liquido'], resultado['iof_descontado'], inv_id)
+            (round(valor_total_liquido, 2), round(iof_total, 2), inv_id)
         )
     
     conn.commit()

@@ -103,6 +103,21 @@
     background-color: rgba(0, 123, 255, 0.05);
 }
 
+/* ========= Alinhamento de alturas entre colunas/cards ========= */
+.equal-height-row {
+    align-items: stretch;
+}
+
+.equal-height-row > [class*="col"] {
+    display: flex;
+}
+
+.equal-height-row > [class*="col"] > .card,
+.equal-height-row > [class*="col"] > .card-group {
+    width: 100%;
+    height: 100%;
+}
+
 /* ========= Tabelas DataTable ========= */
 /* Corrigir cor do dropdown de Status nas tabelas */
 .Select-menu-outer {
@@ -155,6 +170,15 @@
 
 /* ========= Responsividade Mobile ========= */
 
+/* Extratos - bloco resumo (gráfico + card lateral) */
+.extratos-resumo-row .extratos-resumo-card {
+    height: 360px !important;
+}
+
+#bar-graph {
+    height: 340px !important;
+}
+
 /* Tablets e dispositivos médios (até 768px) */
 @media (max-width: 768px) {
     #sidebar_completa {
@@ -202,6 +226,14 @@
         width: 100% !important;
         height: auto !important;
     }
+
+    .extratos-resumo-row .extratos-resumo-card {
+        height: 320px !important;
+    }
+
+    #bar-graph {
+        height: 300px !important;
+    }
 }
 
 /* Smartphones (até 576px) */
@@ -245,6 +277,23 @@
     table {
         font-size: 0.75rem;
         min-width: 500px;
+    }
+
+    .extratos-resumo-row {
+        align-items: initial !important;
+    }
+
+    .extratos-resumo-row > [class*="col"] {
+        display: block !important;
+    }
+
+    .extratos-resumo-row .extratos-resumo-card {
+        height: auto !important;
+        min-height: 260px;
+    }
+
+    #bar-graph {
+        height: 240px !important;
     }
 
     /* Modais ocupam toda a tela */
