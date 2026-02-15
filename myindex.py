@@ -10,6 +10,9 @@ from app import *
 from components import sidebar, dashboards, extratos, login, admin, planos, orcamentos, cartoes
 from globals import *
 
+# Exportar server para Gunicorn
+server = app.server
+
 # DataFrames and Dcc.Store (loaded from SQLite)
 from db import table_to_df
 
