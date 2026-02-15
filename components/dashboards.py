@@ -36,18 +36,50 @@ else:
 end_date = (next_month - timedelta(days=1)).date()
 
 
+def _normalize_status_value(value):
+    if pd.isna(value):
+        return StatusDespesa.A_VENCER
+
+    text = str(value).strip().lower()
+
+    if text in {"pago", "paga", "paid", "1", "true", "sim", "yes"}:
+        return StatusDespesa.PAGO
+    if text in {"vencido", "vencida", "overdue", "atrasado", "2"}:
+        return StatusDespesa.VENCIDO
+    if text in {"a vencer", "avencer", "aberto", "pendente", "0", "false", "nao", "não", "no"}:
+        return StatusDespesa.A_VENCER
+
+    return StatusDespesa.A_VENCER
+
+
+def _normalize_efetuado_value(value):
+    if pd.isna(value):
+        return 0
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "sim", "s", "yes", "y", "pago", "recebido"}:
+        return 1
+    if text in {"0", "false", "nao", "não", "n", "no", "pendente"}:
+        return 0
+
+    try:
+        return 1 if float(text) == 1 else 0
+    except Exception:
+        return 0
+
+
 def _normalize_despesas_for_saldo(df):
     """Normaliza despesas e mantém apenas colunas necessárias para regras de saldo."""
     if df.empty:
         return df
 
-    if 'Status' not in df.columns:
-        if 'Efetuado' in df.columns:
-            df['Status'] = df['Efetuado'].apply(lambda x: StatusDespesa.PAGO if x == 1 else StatusDespesa.A_VENCER)
-        else:
-            df['Status'] = StatusDespesa.A_VENCER
-
-    df['Status'] = df['Status'].fillna(StatusDespesa.A_VENCER)
+    if 'Status' in df.columns:
+        df['Status'] = df['Status'].apply(_normalize_status_value)
+    elif 'Efetuado' in df.columns:
+        df['Efetuado'] = df['Efetuado'].apply(_normalize_efetuado_value)
+        df['Status'] = df['Efetuado'].apply(lambda x: StatusDespesa.PAGO if x == 1 else StatusDespesa.A_VENCER)
+    else:
+        df['Status'] = StatusDespesa.A_VENCER
 
     if 'Valor' in df.columns:
         df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
@@ -62,8 +94,8 @@ def _normalize_receitas_for_saldo(df):
 
     if 'Efetuado' not in df.columns:
         df['Efetuado'] = 1
-
-    df['Efetuado'] = pd.to_numeric(df['Efetuado'], errors='coerce').fillna(0)
+    else:
+        df['Efetuado'] = df['Efetuado'].apply(_normalize_efetuado_value)
 
     if 'Valor' in df.columns:
         df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
