@@ -270,6 +270,27 @@ layout = dbc.Col([
                             ], width=4)
                         ]),
                         
+                        # Nova linha para Forma de Pagamento e Cartão
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Forma de Pagamento"),
+                                dbc.Select(
+                                    id="select-forma-pagamento",
+                                    options=[
+                                        {"label": "💵 Dinheiro", "value": "dinheiro"},
+                                        {"label": "💳 Cartão de Crédito", "value": "cartao"}
+                                    ],
+                                    value="dinheiro"
+                                )
+                            ], width=6),
+                            dbc.Col([
+                                html.Div(id="div-select-cartao", children=[
+                                    html.Label("Cartão"),
+                                    dbc.Select(id="select-cartao", options=[], value=None)
+                                ], style={'display': 'none'})
+                            ], width=6)
+                        ], className="mb-3"),
+                        
                         # Campo de parcelas que aparece apenas quando "Despesa Recorrente" está marcado
                         html.Div(id="parcelas-container", children=[
                             dbc.Row([
@@ -341,6 +362,7 @@ layout = dbc.Col([
                     dbc.NavLink("Extratos", href="/extratos", active="exact"),
                     dbc.NavLink("Orçamentos", href="/orcamentos", active="exact"),
                     dbc.NavLink("Planos e Metas", href="/planos", active="exact"),
+                    dbc.NavLink("💳 Cartões", href="/cartoes", active="exact"),
                 ], vertical=True, pills=True, id='nav_buttons', style={"margin-bottom": "10px"}),
             
             # Link Admin (condicional - será exibido apenas para admins via callback)
@@ -436,6 +458,33 @@ def toggle_parcelas_field(switches):
     if 2 in switches:  # 2 é o valor para "Despesa Recorrente"
         return {'display': 'block'}
     return {'display': 'none'}
+
+# Mostrar/ocultar select de cartão baseado na forma de pagamento
+@app.callback(
+    Output("div-select-cartao", "style"),
+    Input("select-forma-pagamento", "value")
+)
+def toggle_cartao_select(forma_pagamento):
+    if forma_pagamento == "cartao":
+        return {'display': 'block'}
+    return {'display': 'none'}
+
+# Carregar cartões do usuário no select
+@app.callback(
+    Output("select-cartao", "options"),
+    Input("store-user", "data")
+)
+def load_cartoes_user(user):
+    if not user or 'id' not in user:
+        return []
+    
+    try:
+        from db import get_cartoes
+        cartoes = get_cartoes(user['id'])
+        return [{"label": c['nome'], "value": c['id']} for c in cartoes if c.get('ativo', 1)]
+    except Exception as e:
+        print(f"[SIDEBAR] Erro ao carregar cartões: {e}")
+        return []
 
 # Pop-up perfis
 @app.callback(
@@ -782,11 +831,13 @@ def salve_form_receita(n, descricao, valor, date, switches, categoria, plano_id,
         State("select_despesa", "value"),
         State("select-status-despesa", "value"),
         State("input-parcelas", "value"),
+        State("select-forma-pagamento", "value"),
+        State("select-cartao", "value"),
         State('store-despesas', 'data'),
         State('store-user', 'data'),
         State('store-refresh-despesas', 'data')
     ])
-def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, num_parcelas, dict_despesas, user, refresh_despesas):
+def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, num_parcelas, forma_pagamento, cartao_id, dict_despesas, user, refresh_despesas):
     # garante colunas esperadas e insere linha de forma segura
     expected_cols = ['Valor', 'Status', 'Fixo', 'Data', 'Categoria', 'Descrição', 'user_id']
     df_despesas = pd.DataFrame(dict_despesas)
@@ -798,6 +849,9 @@ def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, n
                 df_despesas[c] = None
 
     if n and not(valor == "" or valor == None):
+        from datetime import datetime
+        from db import insert_despesa_parcelada, insert_despesa_com_cartao
+        
         valor = round(float(valor), 2)
         date_iso = pd.to_datetime(date).strftime('%Y-%m-%d')
         categoria = categoria[0] if type(categoria) == list else categoria
@@ -805,15 +859,28 @@ def salve_form_despesa(n, descricao, valor, date, switches, categoria, status, n
         fixo = 1 if 2 in switches else 0
         descricao = descricao if descricao not in (None, "") else 0
         user_id = user['id'] if user and 'id' in user else None
+        
+        # Normalizar forma de pagamento e cartao_id
+        forma_pagamento = forma_pagamento if forma_pagamento else 'dinheiro'
+        cartao_id = int(cartao_id) if (cartao_id and forma_pagamento == 'cartao') else None
+        
+        # Calcular fatura_mes e fatura_ano se for cartão
+        fatura_mes = None
+        fatura_ano = None
+        if cartao_id:
+            data_transacao = datetime.strptime(date_iso, '%Y-%m-%d')
+            fatura_mes = data_transacao.month
+            fatura_ano = data_transacao.year
 
         # Verifica se é despesa recorrente com parcelas
         if fixo == 1 and num_parcelas and int(num_parcelas) > 1:
             # Usa a função de inserção parcelada
-            from db import insert_despesa_parcelada
-            insert_despesa_parcelada(valor, status, fixo, date_iso, categoria, descricao, user_id, int(num_parcelas))
+            insert_despesa_parcelada(valor, status, fixo, date_iso, categoria, descricao, user_id, int(num_parcelas), 
+                                    forma_pagamento=forma_pagamento, cartao_id=cartao_id, fatura_mes=fatura_mes, fatura_ano=fatura_ano)
         else:
             # Insere apenas uma transação no DB associada ao usuário (com Status)
-            insert_transacao('despesas', valor, status, fixo, date_iso, categoria, descricao, user_id)
+            insert_despesa_com_cartao(valor, status, fixo, date_iso, categoria, descricao, user_id, 
+                                    forma_pagamento, cartao_id, fatura_mes, fatura_ano)
 
         # sinaliza reload para store 'store-despesas'
         return (refresh_despesas or 0) + 1

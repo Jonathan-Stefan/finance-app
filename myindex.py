@@ -7,7 +7,7 @@ import plotly.express as px
 
 # import from folders
 from app import *
-from components import sidebar, dashboards, extratos, login, admin, planos, orcamentos
+from components import sidebar, dashboards, extratos, login, admin, planos, orcamentos, cartoes
 from globals import *
 
 # DataFrames and Dcc.Store (loaded from SQLite)
@@ -87,6 +87,9 @@ def render_page_content(pathname, user):
     if pathname == "/orcamentos":
         return orcamentos.layout
     
+    if pathname == "/cartoes":
+        return cartoes.layout
+    
     if pathname == "/admin":
         # Verifica se o usuário é admin
         if not user.get('is_admin'):
@@ -137,14 +140,14 @@ def reload_user_stores(user, r_rec, r_des, r_cat_rec, r_cat_des):
 
     return df_receitas, df_despesas, list_receitas, list_despesas
 
-'''if __name__ == '__main__':
-    app.run(debug=True)'''
-
 if __name__ == '__main__':
+    app.run(debug=True)
+
+'''if __name__ == '__main__':
     import os
     # Detecta se está em produção
     debug_mode = os.getenv('DEBUG', 'True').lower() == 'true'
     port = int(os.getenv('PORT', 8050))
     host = os.getenv('HOST', '0.0.0.0')
     
-    app.run(debug=debug_mode, host=host, port=port)
+    app.run(debug=debug_mode, host=host, port=port)'''

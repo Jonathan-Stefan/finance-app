@@ -100,6 +100,34 @@ def init_db():
         UNIQUE(categoria, mes, ano, user_id)
     )""")
 
+    # Cartões de crédito
+    cur.execute("""CREATE TABLE IF NOT EXISTS cartoes (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        ativo INTEGER DEFAULT 1,
+        limite REAL DEFAULT 0,
+        dia_vencimento INTEGER DEFAULT 10,
+        dia_fechamento INTEGER DEFAULT 5,
+        UNIQUE(nome, user_id)
+    )""")
+
+    # Adicionar campos de cartão nas despesas (se não existirem)
+    cur.execute("""ALTER TABLE despesas 
+        ADD COLUMN IF NOT EXISTS forma_pagamento TEXT DEFAULT 'dinheiro'""")
+    cur.execute("""ALTER TABLE despesas 
+        ADD COLUMN IF NOT EXISTS cartao_id INTEGER""")
+    cur.execute("""ALTER TABLE despesas 
+        ADD COLUMN IF NOT EXISTS fatura_mes INTEGER""")
+    cur.execute("""ALTER TABLE despesas 
+        ADD COLUMN IF NOT EXISTS fatura_ano INTEGER""")
+    cur.execute("""ALTER TABLE despesas 
+        ADD COLUMN IF NOT EXISTS eh_fatura INTEGER DEFAULT 0""")
+    
+    # Adicionar campo saldo_inicial nos users (se não existir)
+    cur.execute("""ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS saldo_inicial REAL DEFAULT 0""")
+
     conn.commit()
 
     # Se não houver usuários, cria um admin padrão
@@ -331,10 +359,11 @@ def insert_transacao(table, valor, status, fixo, data, categoria, descricao, use
 
 
 def update_transacao(table, row_id, fields, user_id):
-    """Atualiza transação existente"""
+    """Atualiza transação existente (com suporte a cartões)"""
     if not fields:
         return
-    allowed = {"Valor", "Efetuado", "Fixo", "Data", "Categoria", "Descrição", "Status"}
+    allowed = {"Valor", "Efetuado", "Fixo", "Data", "Categoria", "Descrição", "Status", 
+               "forma_pagamento", "cartao_id", "fatura_mes", "fatura_ano"}
     payload = {k: v for k, v in fields.items() if k in allowed}
     if not payload:
         return
@@ -342,70 +371,110 @@ def update_transacao(table, row_id, fields, user_id):
         row_id = int(row_id)
     except Exception:
         return
+    
     conn = connect_db()
     cur = conn.cursor()
-    set_clause = ", ".join([f"{col} = %s" for col in payload.keys()])
-    values = list(payload.values()) + [row_id, user_id]
-    cur.execute(f"UPDATE {table} SET {set_clause} WHERE id = %s AND user_id = %s", values)
-    conn.commit()
-    conn.close()
-
-
-def delete_transacao(table, row_id, user_id):
-    """Deleta transação"""
-    try:
-        row_id = int(row_id)
-    except Exception:
-        return
-    conn = connect_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM {table} WHERE id = %s AND user_id = %s", (row_id, user_id))
-    conn.commit()
-    conn.close()
-
-
-
-def delete_cat(table, categoria, user_id):
-    """Deleta categoria do usuário"""
-    conn = connect_db()
-    cur = conn.cursor()
-    cur.execute(f"DELETE FROM {table} WHERE Categoria = %s AND user_id = %s", (categoria, user_id))
-    conn.commit()
-    conn.close()
-
-
-def insert_transacao(table, valor, status, fixo, data, categoria, descricao, user_id, plano_id=None):
-    """Insere transação (receita ou despesa)"""
-    conn = connect_db()
-    cur = conn.cursor()
-    if table == 'despesas':
-        cur.execute(f"INSERT INTO {table} (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                    (valor, status, fixo, data, categoria, descricao, user_id))
+    
+    # Buscar registro atual para detectar mudanças
+    cur.execute(f"SELECT Status, cartao_id, fatura_mes, fatura_ano, forma_pagamento FROM {table} WHERE id = %s AND user_id = %s", (row_id, user_id))
+    registro_atual = cur.fetchone()
+    
+    if registro_atual:
+        status_anterior = registro_atual[0]
+        cartao_id_anterior = registro_atual[1]
+        fatura_mes_anterior = registro_atual[2]
+        fatura_ano_anterior = registro_atual[3]
+        forma_pagamento_anterior = registro_atual[4]
     else:
-        cur.execute(f"INSERT INTO {table} (Valor, Efetuado, Fixo, Data, Categoria, Descrição, user_id, plano_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (valor, status, fixo, data, categoria, descricao, user_id, plano_id))
-    conn.commit()
-    conn.close()
-
-
-def update_transacao(table, row_id, fields, user_id):
-    """Atualiza transação existente"""
-    if not fields:
-        return
-    allowed = {"Valor", "Efetuado", "Fixo", "Data", "Categoria", "Descrição", "Status"}
-    payload = {k: v for k, v in fields.items() if k in allowed}
-    if not payload:
-        return
-    try:
-        row_id = int(row_id)
-    except Exception:
-        return
-    conn = connect_db()
-    cur = conn.cursor()
+        status_anterior = None
+        cartao_id_anterior = None
+        fatura_mes_anterior = None
+        fatura_ano_anterior = None
+        forma_pagamento_anterior = None
+    
+    # Limpar cartao_id vazio ou None
+    if "cartao_id" in payload:
+        if payload["cartao_id"] == '' or payload["cartao_id"] is None:
+            payload["cartao_id"] = None
+        else:
+            try:
+                payload["cartao_id"] = int(payload["cartao_id"])
+            except (ValueError, TypeError):
+                payload["cartao_id"] = None
+    
+    # Se Status muda de "Pago" para outro status, limpar campos de cartão
+    if "Status" in payload and payload["Status"] != "Pago" and status_anterior == "Pago":
+        payload["cartao_id"] = None
+        payload["forma_pagamento"] = "dinheiro"
+        payload["fatura_mes"] = None
+        payload["fatura_ano"] = None
+        print(f"[DB] Status mudou de Pago para {payload['Status']}, limpando campos de cartão")
+    
+    # Se forma_pagamento não é cartao, limpar campos relacionados
+    elif "forma_pagamento" in payload and payload["forma_pagamento"] != "cartao":
+        payload["cartao_id"] = None
+        payload["fatura_mes"] = None
+        payload["fatura_ano"] = None
+    
+    # Se tem cartao_id mas não tem fatura_mes/fatura_ano, calcular
+    if "cartao_id" in payload and payload["cartao_id"]:
+        if "fatura_mes" not in payload or "fatura_ano" not in payload:
+            from datetime import datetime
+            # Se tem Data no payload, usar ela
+            if "Data" in payload:
+                data = payload["Data"]
+                if isinstance(data, str):
+                    data = datetime.strptime(data, "%Y-%m-%d")
+                payload["fatura_mes"] = data.month
+                payload["fatura_ano"] = data.year
+            else:
+                # Se não tem Data no payload, buscar do banco
+                cur.execute(f"SELECT Data FROM {table} WHERE id = %s AND user_id = %s", (row_id, user_id))
+                result = cur.fetchone()
+                if result:
+                    data = result[0]
+                    if isinstance(data, str):
+                        data = datetime.strptime(data, "%Y-%m-%d")
+                    payload["fatura_mes"] = data.month
+                    payload["fatura_ano"] = data.year
+    
     set_clause = ", ".join([f"{col} = %s" for col in payload.keys()])
     values = list(payload.values()) + [row_id, user_id]
     cur.execute(f"UPDATE {table} SET {set_clause} WHERE id = %s AND user_id = %s", values)
     conn.commit()
+    
+    print(f"[DB] update_transacao - payload final: {payload}")
+    print(f"[DB] Verificando geração de fatura: table={table}, Status={payload.get('Status')}, cartao_id={payload.get('cartao_id')}, fatura_mes={payload.get('fatura_mes')}, fatura_ano={payload.get('fatura_ano')}")
+    
+    # Se mudou para Pago com cartão, gerar/atualizar fatura
+    if table == "despesas" and "Status" in payload and payload["Status"] == "Pago":
+        if "cartao_id" in payload and payload["cartao_id"]:
+            if "fatura_mes" in payload and "fatura_ano" in payload:
+                # Garantir que os valores são inteiros
+                try:
+                    cartao_id = int(payload["cartao_id"])
+                    fatura_mes = int(payload["fatura_mes"])
+                    fatura_ano = int(payload["fatura_ano"])
+                    print(f"[DB] Chamando gerar_fatura_cartao: user_id={user_id}, cartao_id={cartao_id}, mes={fatura_mes}, ano={fatura_ano}")
+                    gerar_fatura_cartao(user_id, cartao_id, fatura_mes, fatura_ano)
+                except Exception as e:
+                    print(f"[DB] Erro ao gerar fatura: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"[DB] Fatura não gerada: faltam fatura_mes ou fatura_ano no payload")
+        else:
+            print(f"[DB] Fatura não gerada: cartao_id ausente ou vazio no payload")
+    
+    # Se tinha cartão antes e agora não tem mais (mudou status ou forma_pagamento), recalcular fatura
+    if table == "despesas" and cartao_id_anterior and fatura_mes_anterior and fatura_ano_anterior:
+        if payload.get("cartao_id") is None or payload.get("Status") != "Pago":
+            try:
+                print(f"[DB] Recalculando fatura do cartão {cartao_id_anterior} após mudança de status")
+                gerar_fatura_cartao(user_id, int(cartao_id_anterior), int(fatura_mes_anterior), int(fatura_ano_anterior))
+            except Exception as e:
+                print(f"[DB] Erro ao recalcular fatura: {e}")
+    
     conn.close()
 
 
@@ -422,7 +491,7 @@ def delete_transacao(table, row_id, user_id):
     conn.close()
 
 
-def insert_despesa_parcelada(valor, status, fixo, data, categoria, descricao, user_id, num_parcelas):
+def insert_despesa_parcelada(valor, status, fixo, data, categoria, descricao, user_id, num_parcelas, forma_pagamento='dinheiro', cartao_id=None, fatura_mes=None, fatura_ano=None):
     """Insere despesas parceladas nos meses subsequentes"""
     from datetime import datetime
     from dateutil.relativedelta import relativedelta
@@ -445,15 +514,47 @@ def insert_despesa_parcelada(valor, status, fixo, data, categoria, descricao, us
         else:
             descricao_parcela = descricao
         
+        # Se for cartão, atualiza fatura_mes e fatura_ano para cada parcela
+        parcela_fatura_mes = None
+        parcela_fatura_ano = None
+        if cartao_id and forma_pagamento == 'cartao':
+            parcela_fatura_mes = data_parcela.month
+            parcela_fatura_ano = data_parcela.year
+        
         # Insere a parcela
         cur.execute(
-            "INSERT INTO despesas (Valor, Status, Fixo, Data, Categoria, Descrição, user_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (valor, status, fixo, data_parcela_str, categoria, descricao_parcela, user_id)
+            """INSERT INTO despesas (Valor, Status, Fixo, Data, Categoria, Descrição, user_id, forma_pagamento, cartao_id, fatura_mes, fatura_ano, eh_fatura) 
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0)""",
+            (valor, status, fixo, data_parcela_str, categoria, descricao_parcela, user_id, forma_pagamento, cartao_id, parcela_fatura_mes, parcela_fatura_ano)
         )
+        
+        # Se for cartão e está pago, gerar a fatura
+        if cartao_id and status == 'Pago' and parcela_fatura_mes and parcela_fatura_ano:
+            gerar_fatura_cartao(user_id, cartao_id, parcela_fatura_mes, parcela_fatura_ano)
     
     conn.commit()
     conn.close()
     print(f"[DB] Inseridas {num_parcelas} parcelas de despesa para o usuário {user_id}")
+
+
+def insert_despesa_com_cartao(valor, status, fixo, data, categoria, descricao, user_id, forma_pagamento='dinheiro', cartao_id=None, fatura_mes=None, fatura_ano=None):
+    """Insere despesa com suporte a forma de pagamento e cartão de crédito"""
+    conn = connect_db()
+    cur = conn.cursor()
+    
+    eh_fatura = 0
+    # Insere a despesa
+    cur.execute("""
+        INSERT INTO despesas (Valor, Status, Fixo, Data, Categoria, Descrição, user_id, forma_pagamento, cartao_id, fatura_mes, fatura_ano, eh_fatura)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (valor, status, fixo, data, categoria, descricao, user_id, forma_pagamento, cartao_id, fatura_mes, fatura_ano, eh_fatura))
+    
+    conn.commit()
+    conn.close()
+    
+    # Se for cartão e está pago, gerar/atualizar fatura automaticamente
+    if cartao_id and forma_pagamento == 'cartao' and status == 'Pago' and fatura_mes and fatura_ano:
+        gerar_fatura_cartao(user_id, cartao_id, fatura_mes, fatura_ano)
 
 
 # ---------- Funções de Orçamento ---------- #
@@ -1090,3 +1191,272 @@ def atualizar_valores_investimentos(user_id):
     
     conn.commit()
     conn.close()
+
+
+# =========  Cartões de Crédito  =========== #
+
+def get_cartoes(user_id):
+    """Retorna todos os cartões do usuário"""
+    conn = connect_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT * FROM cartoes WHERE user_id = %s ORDER BY nome", (user_id,))
+    cartoes = cur.fetchall()
+    conn.close()
+    result = [dict(c) for c in cartoes]
+    print(f"[DB] get_cartoes(user_id={user_id}) retornou {len(result)} cartões: {result}")
+    return result
+
+
+def create_cartao(nome, user_id, limite=0, dia_vencimento=10, dia_fechamento=5):
+    """Cria um novo cartão de crédito"""
+    conn = connect_db()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO cartoes (nome, user_id, limite, dia_vencimento, dia_fechamento, ativo) 
+               VALUES (%s, %s, %s, %s, %s, 1) RETURNING id""",
+            (nome, user_id, limite, dia_vencimento, dia_fechamento)
+        )
+        cartao_id = cur.fetchone()[0]
+        conn.commit()
+        return cartao_id
+    except Exception as e:
+        conn.rollback()
+        print(f"[DB] Erro ao criar cartão: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+def update_cartao(cartao_id, nome=None, limite=None, dia_vencimento=None, dia_fechamento=None, ativo=None):
+    """Atualiza um cartão de crédito"""
+    conn = connect_db()
+    cur = conn.cursor()
+    
+    updates = []
+    params = []
+    
+    if nome is not None:
+        updates.append("nome = %s")
+        params.append(nome)
+    if limite is not None:
+        updates.append("limite = %s")
+        params.append(limite)
+    if dia_vencimento is not None:
+        updates.append("dia_vencimento = %s")
+        params.append(dia_vencimento)
+    if dia_fechamento is not None:
+        updates.append("dia_fechamento = %s")
+        params.append(dia_fechamento)
+    if ativo is not None:
+        updates.append("ativo = %s")
+        params.append(ativo)
+    
+    if not updates:
+        conn.close()
+        return
+    
+    params.append(cartao_id)
+    query = f"UPDATE cartoes SET {', '.join(updates)} WHERE id = %s"
+    
+    cur.execute(query, params)
+    conn.commit()
+    conn.close()
+
+
+def delete_cartao(cartao_id):
+    """Desativa um cartão (soft delete)"""
+    conn = connect_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE cartoes SET ativo = 0 WHERE id = %s", (cartao_id,))
+    conn.commit()
+    conn.close()
+
+
+def gerar_fatura_cartao(user_id, cartao_id, mes, ano):
+    """
+    Gera ou atualiza a fatura de um cartão para um mês específico.
+    Consolida todas as despesas pagas no cartão e cria uma única despesa 'Fatura [Nome do Cartão]'
+    """
+    from datetime import datetime
+    
+    # Garantir conversão de tipos
+    try:
+        user_id = int(user_id)
+        cartao_id = int(cartao_id)
+        mes = int(mes)
+        ano = int(ano)
+    except (ValueError, TypeError) as e:
+        print(f"[DB] Erro ao converter tipos em gerar_fatura_cartao: {e}")
+        return None
+    
+    conn = connect_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Buscar informações do cartão
+    cur.execute("SELECT * FROM cartoes WHERE id = %s AND user_id = %s", (cartao_id, user_id))
+    cartao = cur.fetchone()
+    
+    if not cartao:
+        conn.close()
+        return None
+    
+    cartao = dict(cartao)
+    
+    print(f"[DB] gerar_fatura_cartao - user_id={user_id}, cartao_id={cartao_id}, mes={mes}, ano={ano}")
+    print(f"[DB] Cartão encontrado: {cartao['nome']}")
+    
+    # Buscar todas as despesas pagas no cartão neste mês
+    cur.execute("""
+        SELECT SUM(Valor) as total
+        FROM despesas
+        WHERE user_id = %s 
+          AND cartao_id = %s 
+          AND fatura_mes = %s 
+          AND fatura_ano = %s
+          AND Status = 'Pago'
+          AND (eh_fatura = 0 OR eh_fatura IS NULL)
+    """, (user_id, cartao_id, mes, ano))
+    
+    result = cur.fetchone()
+    total_fatura = float(result['total']) if result and result['total'] else 0
+    
+    print(f"[DB] Total de despesas no cartão para fatura {mes:02d}/{ano}: R$ {total_fatura}")
+    
+    if total_fatura == 0:
+        # Se não há despesas, remove fatura se existir
+        print(f"[DB] Nenhuma despesa para faturar, removendo fatura se existir")
+        cur.execute("""
+            DELETE FROM despesas 
+            WHERE user_id = %s 
+              AND cartao_id = %s 
+              AND fatura_mes = %s 
+              AND fatura_ano = %s 
+              AND eh_fatura = 1
+        """, (user_id, cartao_id, mes, ano))
+        conn.commit()
+        conn.close()
+        return None
+    
+    # Calcular data de vencimento da fatura (dia_vencimento do mês seguinte)
+    if mes == 12:
+        proximo_mes = 1
+        proximo_ano = ano + 1
+    else:
+        proximo_mes = mes + 1
+        proximo_ano = ano
+    
+    # Validar dia de vencimento (não pode exceder dias do mês)
+    import calendar
+    max_dia_mes = calendar.monthrange(proximo_ano, proximo_mes)[1]
+    dia_vencimento = min(int(cartao['dia_vencimento']), max_dia_mes)
+    
+    data_vencimento = f"{proximo_ano}-{proximo_mes:02d}-{dia_vencimento:02d}"
+    
+    print(f"[DB] Verificando se já existe fatura para cartão_id={cartao_id}, mes={mes}, ano={ano}")
+    print(f"[DB] Query params: user_id={user_id}, cartao_id={cartao_id}, fatura_mes={mes}, fatura_ano={ano}, eh_fatura=1")
+    
+    # Verificar se já existe fatura para este cartão/mês
+    cur.execute("""
+        SELECT id, Valor, Data, Descrição FROM despesas
+        WHERE user_id = %s 
+          AND cartao_id = %s 
+          AND fatura_mes = %s 
+          AND fatura_ano = %s 
+          AND eh_fatura = 1
+    """, (user_id, cartao_id, mes, ano))
+    
+    fatura_existente = cur.fetchone()
+    
+    print(f"[DB] Fatura existente encontrada: {dict(fatura_existente) if fatura_existente else None}")
+    
+    # Listar todas as faturas do cartão para debug
+    cur.execute("""
+        SELECT id, cartao_id, fatura_mes, fatura_ano, eh_fatura, Valor, Descrição 
+        FROM despesas 
+        WHERE user_id = %s AND cartao_id = %s AND eh_fatura = 1
+        ORDER BY fatura_ano DESC, fatura_mes DESC
+    """, (user_id, cartao_id))
+    todas_faturas = cur.fetchall()
+    print(f"[DB] Todas as faturas do cartão {cartao_id}: {[dict(f) for f in todas_faturas]}")
+    
+    if fatura_existente:
+        # Atualizar fatura existente
+        print(f"[DB] ✓ ATUALIZANDO fatura existente ID={fatura_existente['id']}, novo valor=R$ {total_fatura:.2f}, vencimento={data_vencimento}")
+        cur.execute("""
+            UPDATE despesas 
+            SET Valor = %s, Data = %s, Descrição = %s
+            WHERE id = %s
+        """, (
+            total_fatura,
+            data_vencimento,
+            f"Fatura {cartao['nome']} - {mes:02d}/{ano}",
+            fatura_existente['id']
+        ))
+        fatura_id = fatura_existente['id']
+    else:
+        # Criar nova fatura
+        print(f"[DB] ✓ CRIANDO nova fatura: valor=R$ {total_fatura:.2f}, vencimento={data_vencimento}, categoria='Cartão {cartao['nome']}'")
+        print(f"[DB] Inserindo com: user_id={user_id}, cartao_id={cartao_id}, fatura_mes={mes}, fatura_ano={ano}, eh_fatura=1")
+        cur.execute("""
+            INSERT INTO despesas 
+            (Valor, Status, Fixo, Data, Categoria, Descrição, user_id, forma_pagamento, cartao_id, fatura_mes, fatura_ano, eh_fatura)
+            VALUES (%s, %s, 0, %s, %s, %s, %s, 'dinheiro', %s, %s, %s, 1)
+            RETURNING id
+        """, (
+            total_fatura,
+            'A vencer',
+            data_vencimento,
+            f'Cartão {cartao["nome"]}',
+            f"Fatura {cartao['nome']} - {mes:02d}/{ano}",
+            user_id,
+            cartao_id,
+            mes,
+            ano
+        ))
+        result = cur.fetchone()
+        fatura_id = result['id'] if result else None
+        print(f"[DB] Fatura criada com ID={fatura_id}")
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"[DB] ✓ Fatura processada: ID={fatura_id} | Compras de {mes:02d}/{ano} | Vencimento {data_vencimento} | Total R$ {total_fatura:.2f}")
+    return fatura_id
+    
+    return fatura_id
+
+
+def atualizar_todas_faturas(user_id):
+    """Atualiza todas as faturas de cartão do usuário"""
+    from datetime import datetime
+    
+    conn = connect_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Buscar todos os cartões ativos do usuário
+    cur.execute("SELECT id FROM cartoes WHERE user_id = %s AND ativo = 1", (user_id,))
+    cartoes = cur.fetchall()
+    
+    # Buscar todos os meses/anos que têm despesas no cartão
+    cur.execute("""
+        SELECT DISTINCT fatura_mes, fatura_ano, cartao_id
+        FROM despesas
+        WHERE user_id = %s 
+          AND cartao_id IS NOT NULL 
+          AND fatura_mes IS NOT NULL 
+          AND fatura_ano IS NOT NULL
+          AND eh_fatura = 0
+    """, (user_id,))
+    
+    periodos = cur.fetchall()
+    conn.close()
+    
+    # Gerar/atualizar fatura para cada período
+    for periodo in periodos:
+        gerar_fatura_cartao(
+            user_id,
+            periodo['cartao_id'],
+            periodo['fatura_mes'],
+            periodo['fatura_ano']
+        )

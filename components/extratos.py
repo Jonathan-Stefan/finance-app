@@ -111,6 +111,8 @@ layout = dbc.Col([
                 {"name": "Data", "id": "Data"},
                 {"name": "Categoria", "id": "Categoria"},
                 {"name": "Descrição", "id": "Descrição"},
+                {"name": "Forma Pagto", "id": "forma_pagamento", "presentation": "dropdown"},
+                {"name": "Cartão", "id": "cartao_id", "presentation": "dropdown"},
             ],
             dropdown={
                 'Status': {
@@ -125,6 +127,15 @@ layout = dbc.Col([
                         {'label': FIXO_SIM, 'value': FIXO_SIM},
                         {'label': FIXO_NAO, 'value': FIXO_NAO}
                     ]
+                },
+                'forma_pagamento': {
+                    'options': [
+                        {'label': '💵 Dinheiro', 'value': 'dinheiro'},
+                        {'label': '💳 Cartão', 'value': 'cartao'}
+                    ]
+                },
+                'cartao_id': {
+                    'options': []  # Será preenchido dinamicamente
                 }
             },
             data=[],
@@ -194,6 +205,24 @@ layout = dbc.Col([
             )
         ], width=3),
     ], className="mt-4 equal-height-row extratos-resumo-row"),
+    
+    # Modal para selecionar cartão
+    dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Selecionar Cartão")),
+        dbc.ModalBody([
+            html.P("Esta despesa foi paga com cartão de crédito. Selecione qual cartão:"),
+            dbc.Select(id="select-cartao-extratos", options=[], placeholder="Selecione um cartão"),
+            html.Div(id="feedback-cartao-extratos", className="mt-2")
+        ]),
+        dbc.ModalFooter([
+            dbc.Button("Cancelar", id="btn-cancelar-cartao-extratos", color="secondary"),
+            dbc.Button("Confirmar", id="btn-confirmar-cartao-extratos", color="primary")
+        ])
+    ], id="modal-cartao-extratos", is_open=False),
+    
+    # Store para linha sendo editada
+    dcc.Store(id="store-linha-editada-despesa", data=None),
+    
 ], style={"padding": "10px"})
 
 # =========  Callbacks  =========== #
@@ -222,6 +251,35 @@ def _normalize_row(row):
     if status is not None:
         result["Status"] = status
     
+    # Adiciona forma_pagamento e cartao_id para despesas
+    if 'forma_pagamento' in row:
+        forma_pag = row.get('forma_pagamento', 'dinheiro')
+        result["forma_pagamento"] = forma_pag if forma_pag and forma_pag != '-' else 'dinheiro'
+        
+        # Se for cartão, salva o cartao_id
+        if forma_pag == 'cartao' and 'cartao_id' in row:
+            cartao_id = row.get('cartao_id')
+            if cartao_id and str(cartao_id).strip() and cartao_id != '-':
+                try:
+                    result["cartao_id"] = int(cartao_id)
+                    
+                    # Calcular fatura_mes e fatura_ano baseado na Data
+                    if result.get("Data"):
+                        from datetime import datetime
+                        data = result["Data"]
+                        if isinstance(data, str):
+                            data_obj = datetime.strptime(data, "%Y-%m-%d")
+                            result["fatura_mes"] = data_obj.month
+                            result["fatura_ano"] = data_obj.year
+                            print(f"[EXTRATOS] Calculado fatura_mes={result['fatura_mes']}, fatura_ano={result['fatura_ano']} da Data={data}")
+                except (ValueError, TypeError):
+                    result["cartao_id"] = None
+            else:
+                result["cartao_id"] = None
+        else:
+            result["cartao_id"] = None
+    
+    print(f"[EXTRATOS] _normalize_row resultado: {result}")
     return result
 
 # Tabela receitas - atualizar dados
@@ -263,12 +321,13 @@ def atualizar_dados_receitas(data, start_date, end_date):
     Output('datatable-despesas', 'data'),
     [Input('store-despesas', 'data'),
      Input('date-picker-extratos', 'start_date'),
-     Input('date-picker-extratos', 'end_date')]
+     Input('date-picker-extratos', 'end_date'),
+     Input('store-user', 'data')]
 )
-def atualizar_dados_despesas(data, start_date, end_date):
+def atualizar_dados_despesas(data, start_date, end_date, user):
     df = pd.DataFrame(data)
     if df.empty:
-        df = pd.DataFrame(columns=["id", "Valor", "Status", "Fixo", "Data", "Categoria", "Descrição", "user_id"])
+        df = pd.DataFrame(columns=["id", "Valor", "Status", "Fixo", "Data", "Categoria", "Descrição", "user_id", "forma_pagamento", "cartao_id"])
     
     df['Data'] = pd.to_datetime(df['Data']).dt.date
     
@@ -288,9 +347,26 @@ def atualizar_dados_despesas(data, start_date, end_date):
     df['Fixo'] = df['Fixo'].astype(object)
     df.loc[df['Fixo'] == 0, 'Fixo'] = FIXO_NAO
     df.loc[df['Fixo'] == 1, 'Fixo'] = FIXO_SIM
+    
+    # Forma de pagamento (padrão: dinheiro para registros antigos)
+    if 'forma_pagamento' not in df.columns:
+        df['forma_pagamento'] = 'dinheiro'
+    df['forma_pagamento'] = df['forma_pagamento'].fillna('dinheiro')
+    
+    # Manter cartao_id como está (será usado para edição)
+    if 'cartao_id' not in df.columns:
+        df['cartao_id'] = None
+    
+    # Limpar cartao_id se Status não é "Pago" (garantir consistência)
+    if 'Status' in df.columns and 'cartao_id' in df.columns:
+        df.loc[df['Status'] != StatusDespesa.PAGO, 'cartao_id'] = None
+        df.loc[df['Status'] != StatusDespesa.PAGO, 'forma_pagamento'] = 'dinheiro'
+    
+    # Converter para string vazia se for None/NaN para exibir no DataTable
+    df['cartao_id'] = df['cartao_id'].apply(lambda x: int(x) if pd.notna(x) and x else '')
 
     df = df.fillna('-')
-    # Remove colunas desnecessárias
+    # Remove colunas desnecessárias mas MANTÉM cartao_id
     df = df.drop(columns=[c for c in ["user_id", "Efetuado"] if c in df.columns])
     df = df.sort_values(by='Data', ascending=True)
 
@@ -628,3 +704,59 @@ def display_desp(data, start_date, end_date):
     valor = df['Valor'].sum() if not df.empty else 0
     
     return f"R$ {valor:.2f}"
+
+
+# Atualizar dropdown de cartões na tabela de despesas
+@app.callback(
+    Output('datatable-despesas', 'dropdown'),
+    [Input('store-user', 'data'),
+     Input('store-despesas', 'data')]
+)
+def update_cartoes_dropdown(user, despesas_data):
+    from constants import StatusDespesa, FIXO_SIM, FIXO_NAO
+    
+    # Dropdown base
+    dropdown_base = {
+        'Status': {
+            'options': [
+                {'label': StatusDespesa.PAGO, 'value': StatusDespesa.PAGO},
+                {'label': StatusDespesa.A_VENCER, 'value': StatusDespesa.A_VENCER},
+                {'label': StatusDespesa.VENCIDO, 'value': StatusDespesa.VENCIDO}
+            ]
+        },
+        'Fixo': {
+            'options': [
+                {'label': FIXO_SIM, 'value': FIXO_SIM},
+                {'label': FIXO_NAO, 'value': FIXO_NAO}
+            ]
+        },
+        'forma_pagamento': {
+            'options': [
+                {'label': '💵 Dinheiro', 'value': 'dinheiro'},
+                {'label': '💳 Cartão', 'value': 'cartao'}
+            ]
+        },
+        'cartao_id': {'options': [{'label': '-', 'value': ''}]}
+    }
+    
+    if not user or 'id' not in user:
+        return dropdown_base
+    
+    try:
+        from db import get_cartoes
+        cartoes = get_cartoes(user['id'])
+        
+        if cartoes:
+            cartoes_options = [{'label': c['nome'], 'value': c['id']} for c in cartoes if c.get('ativo', 1)]
+            # Adicionar opção vazia no início
+            cartoes_options.insert(0, {'label': '-', 'value': ''})
+            dropdown_base['cartao_id']['options'] = cartoes_options
+            
+            print(f"[EXTRATOS] Dropdown atualizado com {len(cartoes_options)} opções de cartão")
+        
+        return dropdown_base
+    except Exception as e:
+        print(f"[EXTRATOS] Erro ao atualizar dropdown de cartões: {e}")
+        import traceback
+        traceback.print_exc()
+        return dropdown_base

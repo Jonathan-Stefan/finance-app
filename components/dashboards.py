@@ -290,22 +290,26 @@ def populate_dropdownvalues_despesas(data, start_date, end_date):
     if df.empty or 'Categoria' not in df.columns or 'Valor' not in df.columns:
         return [[], [], "R$ 0", "R$ 0"]
 
-    df_total = _normalize_despesas_for_saldo(df.copy())
+    df_normalized = _normalize_despesas_for_saldo(df.copy())
     
-    # Filtrar por período se houver dados de data
-    if 'Data' in df_total.columns and start_date and end_date:
-        df_total['Data'] = pd.to_datetime(df_total['Data'], errors='coerce')
+    # Filtrar por período ANTES de separar totais e abertas
+    if 'Data' in df_normalized.columns and start_date and end_date:
+        df_normalized['Data'] = pd.to_datetime(df_normalized['Data'], errors='coerce')
         start = pd.to_datetime(start_date, errors='coerce')
         end = pd.to_datetime(end_date, errors='coerce')
         if not pd.isna(start) and not pd.isna(end):
-            mask = (df_total['Data'] >= start) & (df_total['Data'] <= end)
-            df_total = df_total.loc[mask]
-
-    df_abertas = df_total[df_total['Status'] != StatusDespesa.PAGO] if 'Status' in df_total.columns else df_total
+            mask = (df_normalized['Data'] >= start) & (df_normalized['Data'] <= end)
+            df_normalized = df_normalized.loc[mask]
+    
+    # DESPESAS TOTAIS: todas do período
+    df_total = df_normalized.copy()
+    
+    # DESPESAS EM ABERTO: apenas as não pagas do período
+    df_abertas = df_normalized[df_normalized['Status'] != StatusDespesa.PAGO] if 'Status' in df_normalized.columns else df_normalized
 
     valor_total = df_total['Valor'].sum() if not df_total.empty else 0
     valor_abertas = df_abertas['Valor'].sum() if not df_abertas.empty else 0
-    val = df_total.Categoria.unique().tolist() if not df_total.empty else []
+    val = df_normalized.Categoria.unique().tolist() if not df_normalized.empty else []
 
     return [([{"label": x, "value": x} for x in val]), val, f"R$ {valor_total:.2f}", f"R$ {valor_abertas:.2f}"]
 
@@ -315,8 +319,9 @@ def populate_dropdownvalues_despesas(data, start_date, end_date):
     [Input("store-despesas", "data"),
     Input("store-receitas", "data"),
     Input('date-picker-config', 'start_date'),
-    Input('date-picker-config', 'end_date')])
-def saldo_total(despesas, receitas, start_date, end_date):
+    Input('date-picker-config', 'end_date'),
+    Input("store-user", "data")])
+def saldo_total(despesas, receitas, start_date, end_date, user):
     df_despesas = pd.DataFrame(despesas)
     df_receitas = pd.DataFrame(receitas)
     
@@ -324,81 +329,54 @@ def saldo_total(despesas, receitas, start_date, end_date):
     if not df_receitas.empty and 'plano_id' in df_receitas.columns:
         df_receitas = df_receitas[df_receitas['plano_id'].isna()]
     
-    # Normalização para regras de saldo
+    # Normalização
     df_despesas = _normalize_despesas_for_saldo(df_despesas)
     df_receitas = _normalize_receitas_for_saldo(df_receitas)
 
-    # Calcular saldo anterior (antes do período selecionado)
-    saldo_anterior = 0
-    if start_date and not df_despesas.empty and 'Data' in df_despesas.columns:
-        df_despesas['Data'] = pd.to_datetime(df_despesas['Data'], errors='coerce')
-        start = pd.to_datetime(start_date, errors='coerce')
-        
-        if not pd.isna(start):
-            # Despesas em aberto antes do período (não pagas)
-            despesas_anteriores_df = df_despesas[
-                (df_despesas['Data'] < start) &
-                (df_despesas['Status'] != StatusDespesa.PAGO)
-            ]
-            despesas_anteriores = despesas_anteriores_df['Valor'].sum() if 'Valor' in despesas_anteriores_df.columns else 0
-            
-            # Receitas efetivadas antes do período
-            receitas_anteriores = 0
-            if not df_receitas.empty and 'Data' in df_receitas.columns:
-                df_receitas['Data'] = pd.to_datetime(df_receitas['Data'], errors='coerce')
-                receitas_anteriores_df = df_receitas[
-                    (df_receitas['Data'] < start) &
-                    (df_receitas['Efetuado'] == 1)
-                ]
-                receitas_anteriores = receitas_anteriores_df['Valor'].sum() if 'Valor' in receitas_anteriores_df.columns else 0
-            
-            saldo_anterior = receitas_anteriores - despesas_anteriores
+    # LÓGICA CORRETA DE SALDO:
+    # Saldo = Receitas efetivadas - Despesas PAGAS (exceto as pagas no cartão, pois viram fatura)
+    # As despesas pagas no cartão NÃO saem do saldo imediatamente, só quando pagar a fatura
     
-    # Filtrar despesas por período atual
-    if not df_despesas.empty and 'Data' in df_despesas.columns and start_date and end_date:
-        start = pd.to_datetime(start_date, errors='coerce')
-        end = pd.to_datetime(end_date, errors='coerce')
-        if not pd.isna(start) and not pd.isna(end):
-            mask = (df_despesas['Data'] >= start) & (df_despesas['Data'] <= end)
-            df_despesas = df_despesas.loc[mask]
-    
-    # Filtrar receitas por período atual
-    if not df_receitas.empty and 'Data' in df_receitas.columns and start_date and end_date:
-        df_receitas['Data'] = pd.to_datetime(df_receitas['Data'], errors='coerce')
-        start = pd.to_datetime(start_date, errors='coerce')
-        end = pd.to_datetime(end_date, errors='coerce')
-        if not pd.isna(start) and not pd.isna(end):
-            mask = (df_receitas['Data'] >= start) & (df_receitas['Data'] <= end)
-            df_receitas = df_receitas.loc[mask]
-
-    # Calcular saldo do período atual
-    # Considera apenas despesas em aberto (não pagas)
-    if not df_despesas.empty and 'Status' in df_despesas.columns:
-        df_despesas_abertas = df_despesas[df_despesas['Status'] != StatusDespesa.PAGO]
-    else:
-        df_despesas_abertas = df_despesas
-
-    # Considera apenas receitas efetivadas
+    # Receitas efetivadas (todas as efetivadas, independente de período)
     if not df_receitas.empty and 'Efetuado' in df_receitas.columns:
         df_receitas_efetivadas = df_receitas[df_receitas['Efetuado'] == 1]
     else:
         df_receitas_efetivadas = df_receitas
-
-    valor_despesas = df_despesas_abertas['Valor'].sum() if not df_despesas_abertas.empty and 'Valor' in df_despesas_abertas.columns else 0
-    valor_receitas = df_receitas_efetivadas['Valor'].sum() if not df_receitas_efetivadas.empty and 'Valor' in df_receitas_efetivadas.columns else 0
-    saldo_periodo = valor_receitas - valor_despesas
     
-    # Saldo total = saldo anterior + saldo do período
-    valor = saldo_anterior + saldo_periodo
-
-    # Só permite saldo negativo quando houver conta vencida sem pagar
-    possui_vencido = False
+    # Despesas pagas (Status == PAGO) mas EXCLUINDO as que foram pagas no cartão
+    # Porque despesas pagas no cartão não saem do saldo agora, só quando pagar a fatura
     if not df_despesas.empty and 'Status' in df_despesas.columns:
-        possui_vencido = (df_despesas['Status'] == StatusDespesa.VENCIDO).any()
-    if valor < 0 and not possui_vencido:
-        valor = 0
+        df_despesas_pagas = df_despesas[df_despesas['Status'] == StatusDespesa.PAGO]
+        
+        # Excluir despesas pagas no cartão (que não são faturas)
+        # Despesas no cartão geram faturas, e são as faturas que diminuem o saldo
+        if 'forma_pagamento' in df_despesas_pagas.columns:
+            df_despesas_pagas = df_despesas_pagas[
+                (df_despesas_pagas['forma_pagamento'] != 'cartao') | 
+                (df_despesas_pagas.get('eh_fatura', 0) == 1)
+            ]
+    else:
+        df_despesas_pagas = pd.DataFrame()
 
-    return f"R$ {valor:.2f}"
+    valor_receitas = df_receitas_efetivadas['Valor'].sum() if not df_receitas_efetivadas.empty and 'Valor' in df_receitas_efetivadas.columns else 0
+    valor_despesas_pagas = df_despesas_pagas['Valor'].sum() if not df_despesas_pagas.empty and 'Valor' in df_despesas_pagas.columns else 0
+    
+    # Buscar saldo inicial do usuário
+    saldo_inicial = 0
+    if user and 'id' in user:
+        from db import connect_db
+        conn = connect_db()
+        cur = conn.cursor()
+        cur.execute("SELECT saldo_inicial FROM users WHERE id = %s", (user['id'],))
+        result = cur.fetchone()
+        conn.close()
+        if result and result[0]:
+            saldo_inicial = float(result[0])
+    
+    # Saldo = Saldo inicial + Receitas efetivadas - Despesas pagas (dinheiro/faturas)
+    saldo = saldo_inicial + valor_receitas - valor_despesas_pagas
+
+    return f"R$ {saldo:.2f}"
     
 # Gráfico 1
 @app.callback(

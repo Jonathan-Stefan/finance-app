@@ -20,6 +20,12 @@ class TipoTransacao(str, Enum):
     DESPESA = "despesas"
 
 
+class FormaPagamento(str, Enum):
+    """Formas de pagamento possíveis para despesas"""
+    DINHEIRO = "dinheiro"
+    CARTAO = "cartao"
+
+
 # ========= Status e Estados ========= #
 # Valores booleanos
 SIM = 1
